@@ -27,8 +27,9 @@ function createWindow() {
     resizable: false,
     maximizable: false,
     fullscreenable: false,
+    minimizable: true,
+    closable: true,
     skipTaskbar: false,
-    alwaysOnTop: true,
     title: "Little Loveseat",
     show: false,
     webPreferences: {
@@ -66,7 +67,15 @@ function quitWidget() {
 
 ipcMain.on("widget:quit", quitWidget);
 ipcMain.on("widget:minimize", () => {
-  if (win) win.minimize();
+  if (!win || win.isDestroyed()) return;
+  const pinned = win.isAlwaysOnTop();
+  if (pinned) win.setAlwaysOnTop(false);
+  win.setMinimizable(true);
+  win.minimize();
+  win.once("restore", () => {
+    if (!win || win.isDestroyed()) return;
+    if (pinned) win.setAlwaysOnTop(true, "screen-saver");
+  });
 });
 
 ipcMain.handle("server:network", () => hosted);

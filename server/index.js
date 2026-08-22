@@ -4,8 +4,17 @@ const path = require("path");
 const { Server } = require("socket.io");
 
 const DEFAULT_PORT = Number(process.env.PORT || process.env.LOVESEAT_PORT || 3847);
-const INTERACT_COOLDOWN_MS = Number(process.env.LOVESEAT_COOLDOWN_MS || 5 * 60 * 1000);
+const INTERACT_COOLDOWN_MS = Number(process.env.LOVESEAT_COOLDOWN_MS || 15 * 1000);
 const MAX_MESSAGE = 48;
+const LOVE_EMOTES = ["♥", "💕", "💖", "💗", "💓", "💞", "💘", "💝", "😍", "🥰", "🌸", "💌"];
+const SEATS = [
+  { x: 92, y: 172 },
+  { x: 152, y: 172 },
+  { x: 248, y: 164 },
+  { x: 360, y: 170 },
+  { x: 300, y: 198 },
+  { x: 430, y: 150 },
+];
 const RENDERER = path.join(__dirname, "..", "renderer");
 
 const MIME = {
@@ -83,13 +92,28 @@ function leaveRoom(room, userId) {
   room.seats = room.seats.map((id) => (id === userId ? null : id));
 }
 
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
 function publicState(room) {
   return {
     seats: room.seats,
     users: Object.fromEntries(
       [...room.users.entries()].map(([id, user]) => [
         id,
-        { id: user.id, name: user.name, appearance: user.appearance, seat: user.seat, joinedAt: user.joinedAt },
+        {
+          id: user.id,
+          name: user.name,
+          appearance: user.appearance,
+          seat: user.seat,
+          x: user.x,
+          y: user.y,
+          pose: user.pose,
+          facing: user.facing,
+          location: user.location || null,
+          joinedAt: user.joinedAt,
+        },
       ])
     ),
     relationships: Object.fromEntries(
@@ -200,12 +224,18 @@ function attachHearth(httpServer, options = {}) {
         return;
       }
 
+      const spot = SEATS[seat];
       room.users.set(userId, {
         id: userId,
         socketId: socket.id,
         name,
         appearance: payload.character.appearance || {},
         seat,
+        x: existing?.x ?? spot.x,
+        y: existing?.y ?? spot.y,
+        pose: existing?.pose || "sit",
+        facing: existing?.facing || "right",
+        location: existing?.location || null,
         joinedAt: existing?.joinedAt || Date.now(),
       });
       socket.join(key);
@@ -235,14 +265,15 @@ function attachHearth(httpServer, options = {}) {
       const last = room.lastInteractAt.get(userId) || 0;
       const wait = INTERACT_COOLDOWN_MS - (now - last);
       if (wait > 0) {
-        ack?.({ ok: false, error: "Hearts need a rest.", waitMs: wait });
+        ack?.({ ok: false, error: "Wait 15 seconds between notes.", waitMs: wait });
         return;
       }
 
       const type = payload?.type === "love" ? "love" : "message";
+      const emote = LOVE_EMOTES.includes(payload?.emote) ? payload.emote : LOVE_EMOTES[0];
       const text =
         type === "love"
-          ? "♥"
+          ? emote
           : String(payload?.text || "")
               .trim()
               .slice(0, MAX_MESSAGE);
@@ -270,6 +301,75 @@ function attachHearth(httpServer, options = {}) {
       if (room.bubbles.length > 24) room.bubbles.shift();
       emitRoom(io, joined, room);
       ack?.({ ok: true, waitMs: INTERACT_COOLDOWN_MS, relationship: bubble });
+    });
+
+    socket.on("room:move", (payload, ack) => {
+      if (!joined) {
+        ack?.({ ok: false, error: "Join a room first." });
+        return;
+      }
+      const room = rooms.get(joined);
+      const me = room?.users.get(userId);
+      if (!me) {
+        ack?.({ ok: false, error: "You are not in this room." });
+        return;
+      }
+      const x = clamp(Number(payload?.x) || me.x, 40, 500);
+      const y = clamp(Number(payload?.y) || me.y, 110, 230);
+      const pose = payload?.pose === "sit" ? "sit" : payload?.pose === "walk" ? "walk" : "stand";
+      let seat = Number.isInteger(payload?.seat) ? payload.seat : null;
+      if (seat !== null && (seat < 0 || seat >= SEATS.length)) seat = null;
+      if (seat !== null) {
+        const occupant = room.seats[seat];
+        if (occupant && occupant !== userId) {
+          ack?.({ ok: false, error: "That seat is taken." });
+          return;
+        }
+        room.seats = room.seats.map((id) => (id === userId ? null : id));
+        room.seats[seat] = userId;
+        me.x = SEATS[seat].x;
+        me.y = SEATS[seat].y;
+        me.pose = "sit";
+        me.seat = seat;
+      } else {
+        room.seats = room.seats.map((id) => (id === userId ? null : id));
+        me.x = x;
+        me.y = y;
+        me.pose = pose === "sit" ? "stand" : pose;
+        me.seat = null;
+      }
+      me.facing = payload?.facing === "left" ? "left" : "right";
+      emitRoom(io, joined, room);
+      ack?.({ ok: true, x: me.x, y: me.y, pose: me.pose, seat: me.seat });
+    });
+
+    socket.on("location:share", (payload, ack) => {
+      if (!joined) {
+        ack?.({ ok: false, error: "Join a room first." });
+        return;
+      }
+      const room = rooms.get(joined);
+      const me = room?.users.get(userId);
+      if (!me) {
+        ack?.({ ok: false, error: "You are not in this room." });
+        return;
+      }
+      const label = String(payload?.label || "")
+        .trim()
+        .slice(0, 48);
+      if (!label) {
+        ack?.({ ok: false, error: "No place to share." });
+        return;
+      }
+      const lat = Number(payload?.lat);
+      const lng = Number(payload?.lng);
+      me.location = {
+        label,
+        lat: Number.isFinite(lat) ? Math.round(lat * 100) / 100 : null,
+        lng: Number.isFinite(lng) ? Math.round(lng * 100) / 100 : null,
+      };
+      emitRoom(io, joined, room);
+      ack?.({ ok: true, location: me.location });
     });
 
     socket.on("disconnect", () => {

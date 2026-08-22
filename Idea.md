@@ -1,6 +1,7 @@
 # Idea
 
 ## Color Schema
+- use color from color.md
 
 ## Dashboard
 - Main room to customize character.
@@ -14,9 +15,10 @@
 - Able to choose sex: Male or Female
 - Each sex will have own style dress and hair
 - Add the animation of idle animation (both sit and stand pose)
-
+- use clothes style, eye color, hair style from style.md
 ## Main Room
 - Revise the delay to send message to be 15 seconds
 - Add more love emote to send
 - Add the function to share the location of joined users
 - Able to change the seats and walk in the room.
+- The room will be the cozy living room.

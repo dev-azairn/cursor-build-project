@@ -8,8 +8,8 @@ let hosted = { port: DEFAULT_PORT, local: `http://127.0.0.1:${DEFAULT_PORT}`, la
 
 function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
-  const width = 560;
-  const height = 460;
+  const width = 640;
+  const height = 560;
   const x = workArea.x + workArea.width - width - 24;
   const y = workArea.y + workArea.height - height - 24;
 
@@ -56,11 +56,16 @@ ipcMain.handle("widget:set-always-on-top", (_event, enabled) => {
 
 ipcMain.handle("widget:is-always-on-top", () => Boolean(win && win.isAlwaysOnTop()));
 
-ipcMain.handle("widget:close", () => {
-  if (win) win.close();
-});
+function quitWidget() {
+  if (win) {
+    win.destroy();
+    win = null;
+  }
+  app.quit();
+}
 
-ipcMain.handle("widget:minimize", () => {
+ipcMain.on("widget:quit", quitWidget);
+ipcMain.on("widget:minimize", () => {
   if (win) win.minimize();
 });
 

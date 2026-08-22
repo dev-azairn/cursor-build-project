@@ -1,18 +1,14 @@
-const STORAGE_KEY = "little-loveseat-v1";
+const STORAGE_KEY = "little-loveseat-v2";
 const PLAYER_KEY = "little-loveseat-player";
 const DEFAULT_ROOM = "hearth";
 const isWeb = location.protocol.startsWith("http");
+const FEATURES = ["accessory", "hair", "eyes", "sex", "skin", "pose"];
+const CLOTH_KINDS = ["dress", "top", "bottom", "color"];
 
 const state = {
   character: {
     name: "",
-    appearance: {
-      skin: LoveseatArt.SKINS[0],
-      hair: "bob",
-      hairColor: LoveseatArt.HAIR_COLORS[0],
-      shirt: LoveseatArt.SHIRTS[0],
-      accent: LoveseatArt.ACCENTS[0],
-    },
+    appearance: LoveseatStyles.defaultAppearance("female"),
   },
   room: DEFAULT_ROOM,
   serverUrl: "",
@@ -21,6 +17,11 @@ const state = {
   cooldownMs: 5 * 60 * 1000,
   meId: null,
   selectedId: null,
+  inRoom: false,
+  feature: "hair",
+  clothKind: "dress",
+  animFrame: 0,
+  previewPose: "stand",
   snapshot: { seats: Array(6).fill(null), users: {}, relationships: {}, bubbles: [] },
 };
 
@@ -39,7 +40,10 @@ function playerId() {
 function loadLocal() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-    if (saved?.character) state.character = { ...state.character, ...saved.character };
+    if (saved?.character) {
+      state.character.name = saved.character.name || "";
+      state.character.appearance = LoveseatArt.appearanceOf(saved.character.appearance || {});
+    }
     if (saved?.room) state.room = saved.room;
     if (saved?.serverUrl) state.serverUrl = saved.serverUrl;
     if (typeof saved?.alwaysOnTop === "boolean") state.alwaysOnTop = saved.alwaysOnTop;
@@ -68,16 +72,6 @@ function saveLocal() {
 
 function $(id) {
   return document.getElementById(id);
-}
-
-function fillSelect(el, values, labels = values) {
-  el.innerHTML = values
-    .map((value, i) => `<option value="${value}">${labels[i]}</option>`)
-    .join("");
-}
-
-function colorLabel(hex) {
-  return hex.replace("#", "");
 }
 
 function pairKey(a, b) {
@@ -110,8 +104,156 @@ function showModal(id, visible) {
   $(id).classList.toggle("hidden", !visible);
 }
 
+function showDashboard(visible) {
+  $("dashboard").classList.toggle("hidden", !visible);
+  $("stage").classList.toggle("hidden", visible);
+  $("chrome-drag").textContent = visible ? "Character Customization" : "Little Loveseat";
+}
+
+function randomRoomCode() {
+  const words = ["hearth", "cocoa", "petal", "nook", "honey", "maple"];
+  return `${words[Math.floor(Math.random() * words.length)]}${Math.floor(10 + Math.random() * 89)}`;
+}
+
+function featureItems() {
+  const app = state.character.appearance;
+  if (state.feature === "accessory") return LoveseatStyles.ACCESSORIES.map((a) => a.id);
+  if (state.feature === "hair") return LoveseatStyles.hairForSex(app.sex).map((h) => h.id);
+  if (state.feature === "eyes") return LoveseatStyles.EYE_COLORS.map((c) => c.hex);
+  if (state.feature === "sex") return ["female", "male"];
+  if (state.feature === "skin") return LoveseatStyles.SKINS;
+  return ["stand", "sit"];
+}
+
+function currentFeatureValue() {
+  const app = state.character.appearance;
+  if (state.feature === "accessory") return app.accessory;
+  if (state.feature === "hair") return app.hair;
+  if (state.feature === "eyes") return app.eyeColor;
+  if (state.feature === "sex") return app.sex;
+  if (state.feature === "skin") return app.skin;
+  return state.previewPose;
+}
+
+function applyFeatureValue(value) {
+  const app = state.character.appearance;
+  if (state.feature === "accessory") app.accessory = value;
+  else if (state.feature === "hair") app.hair = value;
+  else if (state.feature === "eyes") app.eyeColor = value;
+  else if (state.feature === "sex") {
+    state.character.appearance = LoveseatStyles.defaultAppearance(value);
+  } else if (state.feature === "skin") app.skin = value;
+  else state.previewPose = value;
+  syncCustomize();
+}
+
+function cycleFeature(dir) {
+  const items = featureItems();
+  const i = Math.max(0, items.indexOf(currentFeatureValue()));
+  applyFeatureValue(items[(i + dir + items.length) % items.length]);
+}
+
+function clothItems() {
+  const app = state.character.appearance;
+  if (state.clothKind === "dress") return app.sex === "female" ? LoveseatStyles.DRESSES : [];
+  if (state.clothKind === "top") return LoveseatStyles.TOPS;
+  if (state.clothKind === "bottom") return LoveseatStyles.bottomsForSex(app.sex);
+  return LoveseatStyles.CLOTH_COLORS;
+}
+
 function renderPreview() {
-  LoveseatArt.drawCharacter($("preview"), state.character.appearance, true);
+  LoveseatArt.drawCharacter($("preview"), state.character.appearance, {
+    pose: state.previewPose,
+    frame: state.animFrame,
+    scale: 6,
+  });
+}
+
+function slotButton(selected, draw, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = `slot ${selected ? "on" : ""}`;
+  const canvas = document.createElement("canvas");
+  canvas.width = 36;
+  canvas.height = 36;
+  draw(canvas);
+  btn.appendChild(canvas);
+  btn.addEventListener("click", onClick);
+  return btn;
+}
+
+function fillFeatureSlots() {
+  const root = $("feature-slots");
+  root.innerHTML = "";
+  const app = state.character.appearance;
+  FEATURES.forEach((id) => {
+    root.appendChild(
+      slotButton(state.feature === id, (canvas) => {
+        if (id === "accessory") LoveseatArt.drawClothIcon(canvas, "accessory", app.accessory, app.clothColor);
+        else if (id === "hair") LoveseatArt.drawClothIcon(canvas, "hair", app.hair, app.hairColor);
+        else if (id === "eyes") {
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = app.eyeColor;
+          ctx.fillRect(8, 8, 20, 20);
+        } else if (id === "sex") {
+          LoveseatArt.drawCharacter(canvas, app, { pose: "stand", scale: 2, frame: 0 });
+        } else if (id === "skin") {
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = app.skin;
+          ctx.fillRect(6, 6, 24, 24);
+        } else LoveseatArt.drawCharacter(canvas, app, { pose: state.previewPose, scale: 2, frame: 0 });
+      }, () => {
+        state.feature = id;
+        syncCustomize();
+      })
+    );
+  });
+}
+
+function fillClothSlots() {
+  const root = $("cloth-slots");
+  root.innerHTML = "";
+  const app = state.character.appearance;
+  if (state.clothKind === "dress" && app.sex !== "female") state.clothKind = "top";
+  const items = clothItems();
+  items.forEach((item) => {
+    const id = item.id || item.hex || item;
+    const selected =
+      (state.clothKind === "dress" && app.wearDress && app.dress === id) ||
+      (state.clothKind === "top" && !app.wearDress && app.top === id) ||
+      (state.clothKind === "bottom" && !app.wearDress && app.bottom === id) ||
+      (state.clothKind === "color" && app.clothColor.toLowerCase() === String(id).toLowerCase());
+    root.appendChild(
+      slotButton(selected, (canvas) => {
+        if (state.clothKind === "color") {
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = id;
+          ctx.fillRect(4, 4, 28, 28);
+        } else LoveseatArt.drawClothIcon(canvas, state.clothKind, id, app.clothColor);
+      }, () => {
+        if (state.clothKind === "dress") {
+          app.wearDress = true;
+          app.dress = id;
+        } else if (state.clothKind === "top") {
+          app.wearDress = false;
+          app.top = id;
+        } else if (state.clothKind === "bottom") {
+          app.wearDress = false;
+          app.bottom = id;
+        } else app.clothColor = id;
+        syncCustomize();
+      })
+    );
+  });
+}
+
+function syncCustomize() {
+  document.querySelectorAll("#sex-row [data-sex]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.sex === state.character.appearance.sex);
+  });
+  fillFeatureSlots();
+  fillClothSlots();
+  renderPreview();
 }
 
 function renderSeats() {
@@ -128,10 +270,8 @@ function renderSeats() {
     const canvas = document.createElement("canvas");
     canvas.width = 64;
     canvas.height = 80;
-    if (user) LoveseatArt.drawCharacter(canvas, user.appearance, true);
-    else {
-      const ctx = canvas.getContext("2d");
-      ctx.clearRect(0, 0, 64, 80);
+    if (user) {
+      LoveseatArt.drawCharacter(canvas, user.appearance, { pose: "sit", frame: state.animFrame, scale: 4 });
     }
     const stool = document.createElement("div");
     stool.className = "stool";
@@ -214,7 +354,7 @@ function applySnapshot(snapshot) {
   state.cooldownMs = snapshot.cooldownMs || state.cooldownMs;
   $("you-chip").textContent = state.character.name || "you";
   const count = Object.keys(snapshot.users || {}).length;
-  setStatus(`${state.room} · ${count} sitting`);
+  if (state.inRoom) setStatus(`${state.room} · ${count} sitting`);
   renderSeats();
   (snapshot.bubbles || []).forEach(showBubble);
 }
@@ -249,16 +389,40 @@ async function refreshNetworkHint() {
   const lan = net?.lan?.[0];
   const local = net?.local || (isWeb ? location.origin : "http://127.0.0.1:3847");
   const remote = net?.remote;
-  if (isWeb) {
-    $("lan-hint").textContent = `This site ${location.origin}. Friends open this page, same room code.`;
-  } else if (remote) {
-    $("lan-hint").textContent = `Public ${remote} · this PC ${local}${lan ? ` · LAN ${lan}` : ""}`;
-  } else if (lan) {
-    $("lan-hint").textContent = `This PC ${local} · LAN ${lan}`;
-  } else {
-    $("lan-hint").textContent = `This PC ${local}. Deploy with npm run server for internet play.`;
-  }
+  if (isWeb) $("lan-hint").textContent = `This site ${location.origin}. Friends open this page, same room code.`;
+  else if (remote) $("lan-hint").textContent = `Public ${remote} · this PC ${local}${lan ? ` · LAN ${lan}` : ""}`;
+  else if (lan) $("lan-hint").textContent = `This PC ${local} · LAN ${lan}`;
+  else $("lan-hint").textContent = `This PC ${local}. Deploy with npm run server for internet play.`;
   return net;
+}
+
+function ensureNamed() {
+  const name = $("char-name").value.trim().slice(0, 16);
+  if (!name) {
+    $("char-name").focus();
+    setStatus("Name your chibi first.");
+    return false;
+  }
+  state.character.name = name;
+  state.character.appearance = LoveseatArt.appearanceOf(state.character.appearance);
+  saveLocal();
+  return true;
+}
+
+async function inviteText() {
+  const url = normalizeServerUrl($("server-url").value || state.serverUrl) || (await defaultServerUrl());
+  const room = ($("room-code").value || state.room).trim().toLowerCase() || DEFAULT_ROOM;
+  return `${url}/?room=${encodeURIComponent(room)}`;
+}
+
+async function copyInvite() {
+  const text = await inviteText();
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus("Join link copied.");
+  } catch {
+    setStatus(text);
+  }
 }
 
 async function connectAndJoin() {
@@ -281,6 +445,8 @@ async function connectAndJoin() {
         }
         state.meId = res.id;
         state.cooldownMs = res.cooldownMs || state.cooldownMs;
+        state.inRoom = true;
+        showDashboard(false);
         setStatus(`${res.room} @ ${url.replace(/^https?:\/\//, "")}`);
       }
     );
@@ -321,85 +487,79 @@ function interact(type) {
 }
 
 function bindUi() {
-  fillSelect($("skin"), LoveseatArt.SKINS, LoveseatArt.SKINS.map(colorLabel));
-  fillSelect($("hair"), LoveseatArt.HAIR_STYLES);
-  fillSelect($("hair-color"), LoveseatArt.HAIR_COLORS, LoveseatArt.HAIR_COLORS.map(colorLabel));
-  fillSelect($("shirt"), LoveseatArt.SHIRTS, LoveseatArt.SHIRTS.map(colorLabel));
-  fillSelect($("accent"), LoveseatArt.ACCENTS, LoveseatArt.ACCENTS.map(colorLabel));
-
   $("char-name").value = state.character.name;
-  $("skin").value = state.character.appearance.skin;
-  $("hair").value = state.character.appearance.hair;
-  $("hair-color").value = state.character.appearance.hairColor;
-  $("shirt").value = state.character.appearance.shirt;
-  $("accent").value = state.character.appearance.accent;
   $("room-code").value = state.room;
+  syncCustomize();
   refreshNetworkHint().then(async () => {
     if (!state.serverUrl) state.serverUrl = await defaultServerUrl();
     $("server-url").value = state.serverUrl;
   });
-  renderPreview();
 
-  ["skin", "hair", "hair-color", "shirt", "accent"].forEach((id) => {
-    $(id).addEventListener("change", () => {
-      state.character.appearance = {
-        skin: $("skin").value,
-        hair: $("hair").value,
-        hairColor: $("hair-color").value,
-        shirt: $("shirt").value,
-        accent: $("accent").value,
-      };
-      renderPreview();
+  $("prev-opt").addEventListener("click", () => cycleFeature(-1));
+  $("next-opt").addEventListener("click", () => cycleFeature(1));
+  $("cloth-cat").addEventListener("click", () => {
+    const kinds = state.character.appearance.sex === "female" ? CLOTH_KINDS : ["top", "bottom", "color"];
+    const i = Math.max(0, kinds.indexOf(state.clothKind));
+    state.clothKind = kinds[(i + 1) % kinds.length];
+    fillClothSlots();
+  });
+  document.querySelectorAll("#sex-row [data-sex]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const name = state.character.name;
+      state.character.appearance = LoveseatStyles.defaultAppearance(btn.dataset.sex);
+      state.character.name = name;
+      state.clothKind = btn.dataset.sex === "female" ? "dress" : "top";
+      syncCustomize();
     });
   });
 
-  $("save-char").addEventListener("click", async () => {
-    const name = $("char-name").value.trim().slice(0, 16);
-    if (!name) {
-      $("char-name").focus();
-      return;
-    }
-    state.character.name = name;
+  $("create-room").addEventListener("click", async () => {
+    if (!ensureNamed()) return;
+    state.room = randomRoomCode();
+    $("room-code").value = state.room;
+    state.serverUrl = normalizeServerUrl($("server-url").value) || (await defaultServerUrl());
     saveLocal();
-    showModal("modal-create", false);
+    await copyInvite();
     await connectAndJoin();
   });
-
+  $("open-join").addEventListener("click", async () => {
+    if (!ensureNamed()) return;
+    $("room-code").value = state.room;
+    $("server-url").value = state.serverUrl || (await defaultServerUrl());
+    await refreshNetworkHint();
+    showModal("modal-room", true);
+  });
   $("join-room").addEventListener("click", async () => {
+    if (!ensureNamed()) return;
     state.room = $("room-code").value.trim().toLowerCase() || DEFAULT_ROOM;
     state.serverUrl = normalizeServerUrl($("server-url").value);
     saveLocal();
     showModal("modal-room", false);
     await connectAndJoin();
   });
-
   $("use-local").addEventListener("click", async () => {
     const net = await refreshNetworkHint();
     $("server-url").value = net?.local || "http://127.0.0.1:3847";
   });
-
   $("use-lan").addEventListener("click", async () => {
     const net = await refreshNetworkHint();
     $("server-url").value = net?.lan?.[0] || net?.local || "http://127.0.0.1:3847";
   });
-
   $("use-this-site").addEventListener("click", () => {
     $("server-url").value = location.origin;
   });
+  $("copy-invite").addEventListener("click", copyInvite);
 
-  $("copy-invite").addEventListener("click", async () => {
-    const url = normalizeServerUrl($("server-url").value) || (await defaultServerUrl());
-    const room = $("room-code").value.trim().toLowerCase() || DEFAULT_ROOM;
-    const text = `${url}/?room=${encodeURIComponent(room)}`;
-    try {
-      await navigator.clipboard.writeText(text);
-      setStatus("Invite copied.");
-    } catch {
-      setStatus(text);
+  $("btn-create").addEventListener("click", () => {
+    if (socket) {
+      socket.disconnect();
+      socket = null;
     }
+    state.inRoom = false;
+    state.meId = null;
+    showDashboard(true);
+    setStatus("Dashboard · customize, then create or join.");
   });
-
-  $("btn-create").addEventListener("click", () => showModal("modal-create", true));
   $("btn-room").addEventListener("click", async () => {
     $("room-code").value = state.room;
     $("server-url").value = state.serverUrl || (await defaultServerUrl());
@@ -412,8 +572,19 @@ function bindUi() {
     $("btn-top").classList.toggle("on", state.alwaysOnTop);
     saveLocal();
   });
-  $("btn-min").addEventListener("click", () => window.widget?.minimize());
-  $("btn-close").addEventListener("click", () => window.widget?.close());
+  function quitOrClose(ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (window.widget?.close) window.widget.close();
+    else window.close();
+  }
+  $("btn-min").addEventListener("mousedown", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    window.widget?.minimize();
+  });
+  $("btn-close").addEventListener("mousedown", quitOrClose);
+  $("btn-close").addEventListener("click", quitOrClose);
   $("send-love").addEventListener("click", () => interact("love"));
   $("send-note").addEventListener("click", () => interact("message"));
   $("cancel-interact").addEventListener("click", () => {
@@ -425,19 +596,31 @@ function bindUi() {
   $("btn-top").classList.toggle("on", state.alwaysOnTop);
   if (window.widget) window.widget.setAlwaysOnTop(state.alwaysOnTop);
 
-  setInterval(updateCooldownUi, 1000);
+  setInterval(() => {
+    state.animFrame = (state.animFrame + 1) % 8;
+    if (!$("dashboard").classList.contains("hidden")) renderPreview();
+    if (state.inRoom && !$("stage").classList.contains("hidden")) {
+      document.querySelectorAll(".seat canvas").forEach((canvas, i) => {
+        const userId = state.snapshot.seats[i];
+        const user = userId ? state.snapshot.users[userId] : null;
+        if (user) LoveseatArt.drawCharacter(canvas, user.appearance, { pose: "sit", frame: state.animFrame, scale: 4 });
+      });
+    }
+    if (!$("modal-interact").classList.contains("hidden")) updateCooldownUi();
+  }, 180);
 }
 
 async function boot() {
   if (isWeb) document.documentElement.classList.add("is-web");
   loadLocal();
   bindUi();
-  if (!state.character.name) {
-    showModal("modal-create", true);
-    setStatus("Create your pixel self.");
+  const q = new URLSearchParams(location.search);
+  if (state.character.name && q.get("room")) {
+    await connectAndJoin();
     return;
   }
-  await connectAndJoin();
+  showDashboard(true);
+  setStatus("Dashboard · create a room or join with a link.");
 }
 
 boot();

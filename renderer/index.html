@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* ws://* http://*; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com;"
+    />
+    <title>Little Loveseat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="widget" id="widget">
+      <header class="chrome">
+        <div class="chrome-title">LITTLE LOVESEAT</div>
+        <div class="chrome-actions">
+          <button type="button" class="pix-btn" id="btn-min" title="Minimize">_</button>
+          <button type="button" class="pix-btn danger" id="btn-close" title="Close">x</button>
+        </div>
+      </header>
+
+      <section class="stage" id="stage">
+        <div class="sky"></div>
+        <div class="moon"></div>
+        <div class="stars"></div>
+        <div class="window-frame"></div>
+        <div class="wall"></div>
+        <div class="floor"></div>
+        <div class="rug"></div>
+        <div class="seats" id="seats"></div>
+        <div class="fx" id="fx"></div>
+      </section>
+
+      <footer class="dock">
+        <div class="you" id="you-chip">offline</div>
+        <div class="status" id="status">Waiting for the hearth…</div>
+        <button type="button" class="pix-btn" id="btn-create">ME</button>
+        <button type="button" class="pix-btn" id="btn-room">ROOM</button>
+        <button type="button" class="pix-btn" id="btn-top" title="Always on top">TOP</button>
+      </footer>
+    </div>
+
+    <div class="modal hidden" id="modal-create">
+      <div class="panel">
+        <h2>Who sits here?</h2>
+        <label>Name<input id="char-name" maxlength="16" placeholder="your name" /></label>
+        <div class="preview-row">
+          <canvas id="preview" width="64" height="80"></canvas>
+          <div class="pickers">
+            <label>Skin
+              <select id="skin"></select>
+            </label>
+            <label>Hair
+              <select id="hair"></select>
+            </label>
+            <label>Hair color
+              <select id="hair-color"></select>
+            </label>
+            <label>Shirt
+              <select id="shirt"></select>
+            </label>
+            <label>Accent
+              <select id="accent"></select>
+            </label>
+          </div>
+        </div>
+        <div class="panel-actions">
+          <button type="button" class="pix-btn" id="save-char">Sit down</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="modal-room">
+      <div class="panel">
+        <h2>Join a room</h2>
+        <p class="hint">Share the same code so you sit together.</p>
+        <label>Room code<input id="room-code" maxlength="16" placeholder="hearth" /></label>
+        <div class="panel-actions">
+          <button type="button" class="pix-btn" id="join-room">Join</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="modal-interact">
+      <div class="panel">
+        <h2 id="interact-title">Say something tiny</h2>
+        <p class="hint" id="rel-line">Stranger</p>
+        <label>Note<input id="note" maxlength="48" placeholder="thinking of you" /></label>
+        <p class="cooldown" id="cooldown"></p>
+        <div class="panel-actions">
+          <button type="button" class="pix-btn love" id="send-love">LOVE</button>
+          <button type="button" class="pix-btn" id="send-note">SEND</button>
+          <button type="button" class="pix-btn ghost" id="cancel-interact">BACK</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="../node_modules/socket.io-client/dist/socket.io.min.js"></script>
+    <script src="./sprites.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,5 +1,7 @@
 const STORAGE_KEY = "little-loveseat-v1";
+const PLAYER_KEY = "little-loveseat-player";
 const DEFAULT_ROOM = "hearth";
+const isWeb = location.protocol.startsWith("http");
 
 const state = {
   character: {
@@ -25,6 +27,15 @@ const state = {
 let socket = null;
 let seenBubbles = new Set();
 
+function playerId() {
+  let id = localStorage.getItem(PLAYER_KEY) || "";
+  if (!/^[a-zA-Z0-9_-]{8,40}$/.test(id)) {
+    id = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}${Math.random()}`).replace(/[^a-zA-Z0-9]/g, "").slice(0, 32);
+    localStorage.setItem(PLAYER_KEY, id);
+  }
+  return id;
+}
+
 function loadLocal() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
@@ -36,6 +47,10 @@ function loadLocal() {
   } catch {
     /* ignore */
   }
+  if (!isWeb) return;
+  const q = new URLSearchParams(location.search);
+  if (q.get("room")) state.room = q.get("room").trim().toLowerCase() || DEFAULT_ROOM;
+  if (q.get("server")) state.serverUrl = normalizeServerUrl(q.get("server"));
 }
 
 function saveLocal() {
@@ -67,6 +82,13 @@ function colorLabel(hex) {
 
 function pairKey(a, b) {
   return [a, b].sort().join(":");
+}
+
+function normalizeServerUrl(raw) {
+  const trimmed = String(raw || "").trim().replace(/\/$/, "");
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `http://${trimmed}`;
 }
 
 function remainingMs() {
@@ -197,27 +219,45 @@ function applySnapshot(snapshot) {
   (snapshot.bubbles || []).forEach(showBubble);
 }
 
-function normalizeServerUrl(raw) {
-  const trimmed = String(raw || "").trim().replace(/\/$/, "");
-  if (!trimmed) return "";
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  return `http://${trimmed}`;
-}
-
 async function defaultServerUrl() {
   const net = window.widget && (await window.widget.network());
   if (net?.remote) return net.remote;
+  if (isWeb) return location.origin;
   if (net?.local) return net.local;
   return "http://127.0.0.1:3847";
+}
+
+function socketOptions(url) {
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    host = "";
+  }
+  const vercel = /\.vercel\.app$/i.test(host);
+  return {
+    transports: vercel ? ["websocket"] : ["websocket", "polling"],
+    path: vercel ? "/api/socket-io/socket.io" : "/socket.io",
+    reconnection: true,
+    reconnectionAttempts: 12,
+    timeout: 10000,
+  };
 }
 
 async function refreshNetworkHint() {
   const net = window.widget && (await window.widget.network());
   const lan = net?.lan?.[0];
-  const local = net?.local || "http://127.0.0.1:3847";
-  $("lan-hint").textContent = lan
-    ? `This PC ${local} · LAN ${lan}`
-    : `This PC ${local}. Deploy the server for internet play.`;
+  const local = net?.local || (isWeb ? location.origin : "http://127.0.0.1:3847");
+  const remote = net?.remote;
+  if (isWeb) {
+    $("lan-hint").textContent = `This site ${location.origin}. Friends open this page, same room code.`;
+  } else if (remote) {
+    $("lan-hint").textContent = `Public ${remote} · this PC ${local}${lan ? ` · LAN ${lan}` : ""}`;
+  } else if (lan) {
+    $("lan-hint").textContent = `This PC ${local} · LAN ${lan}`;
+  } else {
+    $("lan-hint").textContent = `This PC ${local}. Deploy with npm run server for internet play.`;
+  }
   return net;
 }
 
@@ -228,17 +268,12 @@ async function connectAndJoin() {
   saveLocal();
   if (socket) socket.disconnect();
   setStatus(`connecting ${url.replace(/^https?:\/\//, "")}…`);
-  socket = io(url, {
-    transports: ["websocket", "polling"],
-    reconnection: true,
-    reconnectionAttempts: 8,
-    timeout: 8000,
-  });
+  socket = io(url, socketOptions(url));
 
   socket.on("connect", () => {
     socket.emit(
       "room:join",
-      { room: state.room, character: state.character },
+      { room: state.room, character: state.character, playerId: playerId() },
       (res) => {
         if (!res?.ok) {
           setStatus(res?.error || "Could not sit down.");
@@ -256,7 +291,9 @@ async function connectAndJoin() {
     if (reason === "io client disconnect") return;
     setStatus("Lost the hearth. Reconnecting…");
   });
-  socket.on("connect_error", () => setStatus("Cannot reach that server URL."));
+  socket.on("connect_error", (err) => {
+    setStatus(err?.message ? `Cannot reach server: ${err.message}` : "Cannot reach that server URL.");
+  });
 }
 
 function interact(type) {
@@ -346,10 +383,14 @@ function bindUi() {
     $("server-url").value = net?.lan?.[0] || net?.local || "http://127.0.0.1:3847";
   });
 
+  $("use-this-site").addEventListener("click", () => {
+    $("server-url").value = location.origin;
+  });
+
   $("copy-invite").addEventListener("click", async () => {
     const url = normalizeServerUrl($("server-url").value) || (await defaultServerUrl());
     const room = $("room-code").value.trim().toLowerCase() || DEFAULT_ROOM;
-    const text = `${url}  room:${room}`;
+    const text = `${url}/?room=${encodeURIComponent(room)}`;
     try {
       await navigator.clipboard.writeText(text);
       setStatus("Invite copied.");
@@ -388,6 +429,7 @@ function bindUi() {
 }
 
 async function boot() {
+  if (isWeb) document.documentElement.classList.add("is-web");
   loadLocal();
   bindUi();
   if (!state.character.name) {

@@ -1,77 +1,34 @@
 # Little Loveseat
 
-Frameless pixel desktop widget for people you love. Characters sit together in a room, send tiny notes or love, and grow into family or lovers.
+A frameless pixel desktop widget. People you love sit on the same couch.
 
-## Spec
-- No native window chrome
-- Character creation
-- Multiplayer rooms over LAN or a deployed server
-- Always on top
-- Sit in a seat when you join
-- Short messages or love, with a **5 minute** wait between sends
-- Relationship levels: Stranger → Friend → Close → Family → Lover
-- Pixel art
+Same **room code** + same **server URL** = you sit together.
 
-## Run the widget
+## Run locally
 
 ```bash
 npm install
-npm start
+npm start            # desktop widget (hosts a hearth on port 3847)
+npm run server       # hearth only — open http://127.0.0.1:3847 in a browser
 ```
 
-## Multiplayer
+On another laptop on the same Wi-Fi: ROOM → LAN (or paste `http://<your-lan-ip>:3847`) and use the same room code.
 
-Everyone must use the **same room code** and the **same server URL**.
-
-| Mode | Server URL | Who can join |
-| --- | --- | --- |
-| This PC | `http://127.0.0.1:3847` | Two windows on one computer |
-| LAN | `http://YOUR_LAN_IP:3847` | Friends on the same wifi |
-| Cloud | `https://your-app.onrender.com` | Anyone on the internet |
-
-In the widget, open **ROOM**:
-
-- **THIS PC** — local hearth
-- **LAN** — fills your wifi address so others can paste it
-- **COPY** — copies `server URL` + `room:code`
-- Paste a deployed HTTPS URL for internet play
-
-Allow Node/Electron through the firewall if LAN joins fail.
-
-Dedicated local server:
+Point the widget at a deployed hearth:
 
 ```bash
-npm run server
+LOVESEAT_SERVER_URL=https://your-app.onrender.com npm start
 ```
 
-Point other widgets at `http://HOST_LAN_IP:3847`.
+## Deploy (one URL for the game + sockets)
 
-To skip hosting a local hearth and only join a cloud server:
+Prefer a **single Node process** so everyone shares the in-memory room: Render, Railway, Fly, or Docker. `PORT` is read automatically. Health check: `/health`.
 
-```powershell
-$env:LOVESEAT_SERVER_URL="https://your-app.onrender.com"
-npm start
-```
+- **Render:** this repo’s `render.yaml` (`npm ci --omit=dev` + `node server/index.js`)
+- **Railway:** `railway.json` start command is `node server/index.js`
+- **Fly:** `fly launch` using the Dockerfile
+- **Docker:** `docker build -t little-loveseat . && docker run -p 3847:3847 little-loveseat`
 
-Faster interaction testing: `$env:LOVESEAT_COOLDOWN_MS=10000` before `npm start`.
+Vercel can host the page plus a Socket.IO function (`api/socket-io.js`, websocket-only). Shared rooms are more reliable on Render/Railway/Fly because all seats live in one process.
 
-## Deploy the multiplayer server
-
-Socket rooms need a long-running Node process (`PORT` is read automatically). Vercel serverless is not used for this.
-
-### Render
-
-1. Push this repo to GitHub.
-2. New Web Service → this repo, or `render.yaml`.
-3. Build `npm ci --omit=dev`, start `node server/index.js`.
-4. Open `https://YOUR-SERVICE.onrender.com/health` — should return `{ "ok": true }`.
-5. In the widget **ROOM** field, paste that HTTPS URL.
-
-### Railway / Fly / any Docker host
-
-```bash
-docker build -t little-loveseat .
-docker run -p 3847:3847 -e PORT=3847 little-loveseat
-```
-
-`Procfile` is included for Railway/Heroku-style platforms.
+After deploy, friends open the https URL (or paste it into ROOM → Server URL) and use the same room code. COPY makes an invite like `https://…/?room=hearth`.

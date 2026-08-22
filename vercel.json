@@ -1,0 +1,6 @@
+{
+  "buildCommand": "mkdir -p public && cp -R renderer/. public/",
+  "outputDirectory": "public",
+  "framework": null,
+  "rewrites": [{ "source": "/health", "destination": "/api/health" }]
+}

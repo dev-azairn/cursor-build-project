@@ -27,6 +27,23 @@ body {
   user-select: none;
 }
 
+html.is-web,
+html.is-web body {
+  background: #140c22;
+}
+
+html.is-web .electron-only {
+  display: none;
+}
+
+html:not(.is-web) .web-only {
+  display: none;
+}
+
+html.is-web .dock {
+  grid-template-columns: 92px 1fr auto auto;
+}
+
 button,
 input,
 select {

@@ -1,9 +1,23 @@
+const fs = require("fs");
 const http = require("http");
+const path = require("path");
 const { Server } = require("socket.io");
 
 const DEFAULT_PORT = Number(process.env.PORT || process.env.LOVESEAT_PORT || 3847);
 const INTERACT_COOLDOWN_MS = Number(process.env.LOVESEAT_COOLDOWN_MS || 5 * 60 * 1000);
 const MAX_MESSAGE = 48;
+const RENDERER = path.join(__dirname, "..", "renderer");
+
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+};
 
 const LEVELS = [
   { name: "Stranger", min: 0 },
@@ -43,7 +57,20 @@ function getRoom(code) {
   return { key, room: rooms.get(key) };
 }
 
-function assignSeat(room, userId) {
+function playerIdOf(payload, socket) {
+  const raw = String(payload?.playerId || "")
+    .replace(/[^a-zA-Z0-9_-]/g, "")
+    .slice(0, 40);
+  return raw.length >= 8 ? raw : socket.id;
+}
+
+function assignSeat(room, userId, preferred) {
+  const held = room.seats.indexOf(userId);
+  if (held !== -1) return held;
+  if (Number.isInteger(preferred) && preferred >= 0 && preferred < room.seats.length && !room.seats[preferred]) {
+    room.seats[preferred] = userId;
+    return preferred;
+  }
   const free = room.seats.findIndex((id) => !id);
   if (free === -1) return -1;
   room.seats[free] = userId;
@@ -59,7 +86,12 @@ function leaveRoom(room, userId) {
 function publicState(room) {
   return {
     seats: room.seats,
-    users: Object.fromEntries(room.users),
+    users: Object.fromEntries(
+      [...room.users.entries()].map(([id, user]) => [
+        id,
+        { id: user.id, name: user.name, appearance: user.appearance, seat: user.seat, joinedAt: user.joinedAt },
+      ])
+    ),
     relationships: Object.fromEntries(
       [...room.relationships.entries()].map(([key, score]) => [
         key,
@@ -81,27 +113,61 @@ function roomStats() {
   return { rooms: rooms.size, players };
 }
 
-function startHttpServer(port) {
-  const httpServer = http.createServer((req, res) => {
-    const url = req.url || "/";
-    if (url.startsWith("/health")) {
-      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
-      res.end(JSON.stringify({ ok: true, service: "little-loveseat", ...roomStats() }));
+function safeFile(urlPath) {
+  const cleaned = decodeURIComponent(urlPath.split("?")[0]);
+  const name = cleaned === "/" ? "/index.html" : cleaned;
+  const abs = path.normalize(path.join(RENDERER, name));
+  if (!abs.startsWith(RENDERER)) return null;
+  return abs;
+}
+
+function sendFile(res, filePath) {
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("not found");
       return;
     }
-    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Little Loveseat hearth is lit. Point the widget server URL here.");
+    res.writeHead(200, {
+      "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream",
+      "Cache-Control": "no-cache",
+    });
+    res.end(data);
   });
+}
+
+function handleHttp(req, res) {
+  const url = req.url || "/";
+  if (url.startsWith("/health")) {
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+    });
+    res.end(JSON.stringify({ ok: true, service: "little-loveseat", ...roomStats() }));
+    return;
+  }
+  const file = safeFile(url);
+  if (!file) {
+    res.writeHead(403);
+    res.end();
+    return;
+  }
+  sendFile(res, file);
+}
+
+function attachHearth(httpServer, options = {}) {
   const io = new Server(httpServer, {
     cors: { origin: true, credentials: true },
     transports: ["websocket", "polling"],
     pingInterval: 20000,
     pingTimeout: 25000,
     allowEIO3: true,
+    path: options.socketPath || "/socket.io",
   });
 
   io.on("connection", (socket) => {
     let joined = null;
+    let userId = socket.id;
 
     socket.on("room:join", (payload, ack) => {
       const name = String(payload?.character?.name || "").trim().slice(0, 16);
@@ -109,33 +175,43 @@ function startHttpServer(port) {
         ack?.({ ok: false, error: "Name your character first." });
         return;
       }
+
+      userId = playerIdOf(payload, socket);
+      socket.data.userId = userId;
+
       if (joined) {
         const prev = rooms.get(joined);
         if (prev) {
-          leaveRoom(prev, socket.id);
+          const occupant = prev.users.get(userId);
+          if (!occupant || occupant.socketId === socket.id) {
+            leaveRoom(prev, userId);
+          }
           socket.leave(joined);
           emitRoom(io, joined, prev);
+          if (prev.users.size === 0) rooms.delete(joined);
         }
       }
 
       const { key, room } = getRoom(payload?.room);
-      const seat = assignSeat(room, socket.id);
+      const existing = room.users.get(userId);
+      const seat = assignSeat(room, userId, existing?.seat);
       if (seat === -1) {
         ack?.({ ok: false, error: "This room is full. Try another code." });
         return;
       }
 
-      room.users.set(socket.id, {
-        id: socket.id,
+      room.users.set(userId, {
+        id: userId,
+        socketId: socket.id,
         name,
         appearance: payload.character.appearance || {},
         seat,
-        joinedAt: Date.now(),
+        joinedAt: existing?.joinedAt || Date.now(),
       });
       socket.join(key);
       joined = key;
       emitRoom(io, key, room);
-      ack?.({ ok: true, id: socket.id, room: key, seat, cooldownMs: INTERACT_COOLDOWN_MS });
+      ack?.({ ok: true, id: userId, room: key, seat, cooldownMs: INTERACT_COOLDOWN_MS });
     });
 
     socket.on("interact", (payload, ack) => {
@@ -148,7 +224,7 @@ function startHttpServer(port) {
         ack?.({ ok: false, error: "Room missing." });
         return;
       }
-      const me = room.users.get(socket.id);
+      const me = room.users.get(userId);
       const target = room.users.get(payload?.targetId);
       if (!me || !target || target.id === me.id) {
         ack?.({ ok: false, error: "Pick someone sitting with you." });
@@ -156,7 +232,7 @@ function startHttpServer(port) {
       }
 
       const now = Date.now();
-      const last = room.lastInteractAt.get(socket.id) || 0;
+      const last = room.lastInteractAt.get(userId) || 0;
       const wait = INTERACT_COOLDOWN_MS - (now - last);
       if (wait > 0) {
         ack?.({ ok: false, error: "Hearts need a rest.", waitMs: wait });
@@ -179,7 +255,7 @@ function startHttpServer(port) {
       const gain = type === "love" ? 3 : 1;
       const score = (room.relationships.get(key) || 0) + gain;
       room.relationships.set(key, score);
-      room.lastInteractAt.set(socket.id, now);
+      room.lastInteractAt.set(userId, now);
       const bubble = {
         id: `${now}-${me.id}`,
         from: me.id,
@@ -200,12 +276,24 @@ function startHttpServer(port) {
       if (!joined) return;
       const room = rooms.get(joined);
       if (!room) return;
-      leaveRoom(room, socket.id);
+      const occupant = room.users.get(userId);
+      if (occupant && occupant.socketId !== socket.id) return;
+      leaveRoom(room, userId);
       emitRoom(io, joined, room);
       if (room.users.size === 0) rooms.delete(joined);
     });
   });
 
+  return io;
+}
+
+function createHttpServer() {
+  return http.createServer(handleHttp);
+}
+
+function startHttpServer(port, options = {}) {
+  const httpServer = createHttpServer();
+  const io = attachHearth(httpServer, options);
   return new Promise((resolve, reject) => {
     httpServer.once("error", reject);
     httpServer.listen(port, "0.0.0.0", () => {
@@ -236,4 +324,10 @@ if (require.main === module) {
   });
 }
 
-module.exports = { startServer, DEFAULT_PORT, INTERACT_COOLDOWN_MS };
+module.exports = {
+  startServer,
+  attachHearth,
+  createHttpServer,
+  DEFAULT_PORT,
+  INTERACT_COOLDOWN_MS,
+};

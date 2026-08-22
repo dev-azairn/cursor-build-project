@@ -6,7 +6,9 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
-    "server": "node server/index.js"
+    "desktop": "electron .",
+    "server": "node server/index.js",
+    "build:web": "mkdir -p public && cp -R renderer/. public/"
   },
   "author": "Piyapong",
   "license": "MIT",

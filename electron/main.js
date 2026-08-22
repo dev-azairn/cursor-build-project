@@ -71,13 +71,15 @@ app.whenReady().then(async () => {
   if (!skipLocal) {
     const started = await startServer();
     hosted = localUrls(started.port || DEFAULT_PORT);
+    hosted.remote = process.env.LOVESEAT_PUBLIC_URL || process.env.LOVESEAT_SERVER_URL || "";
     if (hosted.lan[0]) console.log(`LAN invite: ${hosted.lan[0]}`);
+    if (hosted.remote) console.log(`Public hearth: ${hosted.remote}`);
   } else {
     hosted = {
       port: DEFAULT_PORT,
       local: process.env.LOVESEAT_SERVER_URL,
       lan: [],
-      remote: process.env.LOVESEAT_SERVER_URL,
+      remote: process.env.LOVESEAT_PUBLIC_URL || process.env.LOVESEAT_SERVER_URL,
     };
   }
   createWindow();

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; connect-src 'self' http: https: ws: wss:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com;"
+      content="default-src 'self'; connect-src 'self' http: https: ws: wss:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self';"
     />
     <title>Little Loveseat</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -20,8 +20,8 @@
       <header class="chrome">
         <div class="chrome-title">LITTLE LOVESEAT</div>
         <div class="chrome-actions">
-          <button type="button" class="pix-btn" id="btn-min" title="Minimize">_</button>
-          <button type="button" class="pix-btn danger" id="btn-close" title="Close">x</button>
+          <button type="button" class="pix-btn electron-only" id="btn-min" title="Minimize">_</button>
+          <button type="button" class="pix-btn danger electron-only" id="btn-close" title="Close">x</button>
         </div>
       </header>
 
@@ -42,7 +42,7 @@
         <div class="status" id="status">Waiting for the hearth…</div>
         <button type="button" class="pix-btn" id="btn-create">ME</button>
         <button type="button" class="pix-btn" id="btn-room">ROOM</button>
-        <button type="button" class="pix-btn" id="btn-top" title="Always on top">TOP</button>
+        <button type="button" class="pix-btn electron-only" id="btn-top" title="Always on top">TOP</button>
       </footer>
     </div>
 
@@ -79,13 +79,14 @@
     <div class="modal hidden" id="modal-room">
       <div class="panel">
         <h2>Join a room</h2>
-        <p class="hint">Same room code + same server URL = you sit together.</p>
+        <p class="hint">Same room code + same server URL = you sit together. Deploy the Node server, then paste that https URL here.</p>
         <label>Room code<input id="room-code" maxlength="16" placeholder="hearth" /></label>
-        <label>Server URL<input id="server-url" maxlength="120" placeholder="http://127.0.0.1:3847" /></label>
+        <label>Server URL<input id="server-url" maxlength="180" placeholder="http://127.0.0.1:3847" /></label>
         <p class="hint" id="lan-hint">LAN invite appears after the hearth starts.</p>
         <div class="panel-actions">
           <button type="button" class="pix-btn" id="use-local">THIS PC</button>
           <button type="button" class="pix-btn" id="use-lan">LAN</button>
+          <button type="button" class="pix-btn web-only" id="use-this-site">THIS SITE</button>
           <button type="button" class="pix-btn" id="copy-invite">COPY</button>
           <button type="button" class="pix-btn" id="join-room">Join</button>
         </div>
@@ -106,7 +107,7 @@
       </div>
     </div>
 
-    <script src="../node_modules/socket.io-client/dist/socket.io.min.js"></script>
+    <script src="./vendor/socket.io.min.js"></script>
     <script src="./sprites.js"></script>
     <script src="./app.js"></script>
   </body>

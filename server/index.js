@@ -1,7 +1,7 @@
 const http = require("http");
 const { Server } = require("socket.io");
 
-const DEFAULT_PORT = Number(process.env.LOVESEAT_PORT || 3847);
+const DEFAULT_PORT = Number(process.env.PORT || process.env.LOVESEAT_PORT || 3847);
 const INTERACT_COOLDOWN_MS = Number(process.env.LOVESEAT_COOLDOWN_MS || 5 * 60 * 1000);
 const MAX_MESSAGE = 48;
 
@@ -75,13 +75,29 @@ function emitRoom(io, key, room) {
   io.to(key).emit("room:state", publicState(room));
 }
 
+function roomStats() {
+  let players = 0;
+  for (const room of rooms.values()) players += room.users.size;
+  return { rooms: rooms.size, players };
+}
+
 function startHttpServer(port) {
-  const httpServer = http.createServer((_req, res) => {
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("Little Loveseat");
+  const httpServer = http.createServer((req, res) => {
+    const url = req.url || "/";
+    if (url.startsWith("/health")) {
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ ok: true, service: "little-loveseat", ...roomStats() }));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Little Loveseat hearth is lit. Point the widget server URL here.");
   });
   const io = new Server(httpServer, {
-    cors: { origin: "*" },
+    cors: { origin: true, credentials: true },
+    transports: ["websocket", "polling"],
+    pingInterval: 20000,
+    pingTimeout: 25000,
+    allowEIO3: true,
   });
 
   io.on("connection", (socket) => {
@@ -202,7 +218,7 @@ function startHttpServer(port) {
 async function startServer(preferredPort = DEFAULT_PORT) {
   try {
     const started = await startHttpServer(preferredPort);
-    console.log(`Little Loveseat listening on :${started.port}`);
+    console.log(`Little Loveseat listening on 0.0.0.0:${started.port}`);
     return started;
   } catch (err) {
     if (err && err.code === "EADDRINUSE") {

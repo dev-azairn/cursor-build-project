@@ -1,13 +1,15 @@
 const { app, BrowserWindow, ipcMain, screen } = require("electron");
 const path = require("path");
 const { startServer, DEFAULT_PORT } = require("../server");
+const { localUrls } = require("./network");
 
 let win = null;
+let hosted = { port: DEFAULT_PORT, local: `http://127.0.0.1:${DEFAULT_PORT}`, lan: [] };
 
 function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
   const width = 560;
-  const height = 420;
+  const height = 460;
   const x = workArea.x + workArea.width - width - 24;
   const y = workArea.y + workArea.height - height - 24;
 
@@ -62,10 +64,22 @@ ipcMain.handle("widget:minimize", () => {
   if (win) win.minimize();
 });
 
-ipcMain.handle("server:port", () => DEFAULT_PORT);
+ipcMain.handle("server:network", () => hosted);
 
 app.whenReady().then(async () => {
-  await startServer();
+  const skipLocal = Boolean(process.env.LOVESEAT_SERVER_URL || process.env.LOVESEAT_SKIP_LOCAL);
+  if (!skipLocal) {
+    const started = await startServer();
+    hosted = localUrls(started.port || DEFAULT_PORT);
+    if (hosted.lan[0]) console.log(`LAN invite: ${hosted.lan[0]}`);
+  } else {
+    hosted = {
+      port: DEFAULT_PORT,
+      local: process.env.LOVESEAT_SERVER_URL,
+      lan: [],
+      remote: process.env.LOVESEAT_SERVER_URL,
+    };
+  }
   createWindow();
 });
 

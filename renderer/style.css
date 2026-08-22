@@ -323,6 +323,8 @@ select {
 
 .panel {
   width: 420px;
+  max-height: 420px;
+  overflow: auto;
   background: #3b2450;
   border: 4px solid #1b1024;
   box-shadow: 6px 6px 0 #1b1024;
@@ -384,6 +386,7 @@ select {
 
 .panel-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
 }

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* ws://* http://*; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com;"
+      content="default-src 'self'; connect-src 'self' http: https: ws: wss:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com;"
     />
     <title>Little Loveseat</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -79,9 +79,14 @@
     <div class="modal hidden" id="modal-room">
       <div class="panel">
         <h2>Join a room</h2>
-        <p class="hint">Share the same code so you sit together.</p>
+        <p class="hint">Same room code + same server URL = you sit together.</p>
         <label>Room code<input id="room-code" maxlength="16" placeholder="hearth" /></label>
+        <label>Server URL<input id="server-url" maxlength="120" placeholder="http://127.0.0.1:3847" /></label>
+        <p class="hint" id="lan-hint">LAN invite appears after the hearth starts.</p>
         <div class="panel-actions">
+          <button type="button" class="pix-btn" id="use-local">THIS PC</button>
+          <button type="button" class="pix-btn" id="use-lan">LAN</button>
+          <button type="button" class="pix-btn" id="copy-invite">COPY</button>
           <button type="button" class="pix-btn" id="join-room">Join</button>
         </div>
       </div>

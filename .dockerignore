@@ -1,0 +1,8 @@
+node_modules
+.git
+.cursor
+*.md
+electron
+renderer
+.env
+.DS_Store

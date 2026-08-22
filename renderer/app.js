@@ -13,6 +13,7 @@ const state = {
     },
   },
   room: DEFAULT_ROOM,
+  serverUrl: "",
   alwaysOnTop: true,
   lastInteractAt: 0,
   cooldownMs: 5 * 60 * 1000,
@@ -29,6 +30,7 @@ function loadLocal() {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
     if (saved?.character) state.character = { ...state.character, ...saved.character };
     if (saved?.room) state.room = saved.room;
+    if (saved?.serverUrl) state.serverUrl = saved.serverUrl;
     if (typeof saved?.alwaysOnTop === "boolean") state.alwaysOnTop = saved.alwaysOnTop;
     if (saved?.lastInteractAt) state.lastInteractAt = saved.lastInteractAt;
   } catch {
@@ -42,6 +44,7 @@ function saveLocal() {
     JSON.stringify({
       character: state.character,
       room: state.room,
+      serverUrl: state.serverUrl,
       alwaysOnTop: state.alwaysOnTop,
       lastInteractAt: state.lastInteractAt,
     })
@@ -194,10 +197,43 @@ function applySnapshot(snapshot) {
   (snapshot.bubbles || []).forEach(showBubble);
 }
 
+function normalizeServerUrl(raw) {
+  const trimmed = String(raw || "").trim().replace(/\/$/, "");
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `http://${trimmed}`;
+}
+
+async function defaultServerUrl() {
+  const net = window.widget && (await window.widget.network());
+  if (net?.remote) return net.remote;
+  if (net?.local) return net.local;
+  return "http://127.0.0.1:3847";
+}
+
+async function refreshNetworkHint() {
+  const net = window.widget && (await window.widget.network());
+  const lan = net?.lan?.[0];
+  const local = net?.local || "http://127.0.0.1:3847";
+  $("lan-hint").textContent = lan
+    ? `This PC ${local} · LAN ${lan}`
+    : `This PC ${local}. Deploy the server for internet play.`;
+  return net;
+}
+
 async function connectAndJoin() {
-  const port = (window.widget && (await window.widget.serverPort())) || 3847;
+  const fallback = await defaultServerUrl();
+  const url = normalizeServerUrl(state.serverUrl) || fallback;
+  state.serverUrl = url;
+  saveLocal();
   if (socket) socket.disconnect();
-  socket = io(`http://127.0.0.1:${port}`, { transports: ["websocket"] });
+  setStatus(`connecting ${url.replace(/^https?:\/\//, "")}…`);
+  socket = io(url, {
+    transports: ["websocket", "polling"],
+    reconnection: true,
+    reconnectionAttempts: 8,
+    timeout: 8000,
+  });
 
   socket.on("connect", () => {
     socket.emit(
@@ -210,13 +246,17 @@ async function connectAndJoin() {
         }
         state.meId = res.id;
         state.cooldownMs = res.cooldownMs || state.cooldownMs;
-        setStatus(`seated in ${res.room}`);
+        setStatus(`${res.room} @ ${url.replace(/^https?:\/\//, "")}`);
       }
     );
   });
 
   socket.on("room:state", applySnapshot);
-  socket.on("connect_error", () => setStatus("No hearth yet. Is the app open?"));
+  socket.on("disconnect", (reason) => {
+    if (reason === "io client disconnect") return;
+    setStatus("Lost the hearth. Reconnecting…");
+  });
+  socket.on("connect_error", () => setStatus("Cannot reach that server URL."));
 }
 
 function interact(type) {
@@ -257,6 +297,10 @@ function bindUi() {
   $("shirt").value = state.character.appearance.shirt;
   $("accent").value = state.character.appearance.accent;
   $("room-code").value = state.room;
+  refreshNetworkHint().then(async () => {
+    if (!state.serverUrl) state.serverUrl = await defaultServerUrl();
+    $("server-url").value = state.serverUrl;
+  });
   renderPreview();
 
   ["skin", "hair", "hair-color", "shirt", "accent"].forEach((id) => {
@@ -286,14 +330,39 @@ function bindUi() {
 
   $("join-room").addEventListener("click", async () => {
     state.room = $("room-code").value.trim().toLowerCase() || DEFAULT_ROOM;
+    state.serverUrl = normalizeServerUrl($("server-url").value);
     saveLocal();
     showModal("modal-room", false);
     await connectAndJoin();
   });
 
+  $("use-local").addEventListener("click", async () => {
+    const net = await refreshNetworkHint();
+    $("server-url").value = net?.local || "http://127.0.0.1:3847";
+  });
+
+  $("use-lan").addEventListener("click", async () => {
+    const net = await refreshNetworkHint();
+    $("server-url").value = net?.lan?.[0] || net?.local || "http://127.0.0.1:3847";
+  });
+
+  $("copy-invite").addEventListener("click", async () => {
+    const url = normalizeServerUrl($("server-url").value) || (await defaultServerUrl());
+    const room = $("room-code").value.trim().toLowerCase() || DEFAULT_ROOM;
+    const text = `${url}  room:${room}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus("Invite copied.");
+    } catch {
+      setStatus(text);
+    }
+  });
+
   $("btn-create").addEventListener("click", () => showModal("modal-create", true));
-  $("btn-room").addEventListener("click", () => {
+  $("btn-room").addEventListener("click", async () => {
     $("room-code").value = state.room;
+    $("server-url").value = state.serverUrl || (await defaultServerUrl());
+    await refreshNetworkHint();
     showModal("modal-room", true);
   });
   $("btn-top").addEventListener("click", async () => {

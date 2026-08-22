@@ -5,5 +5,6 @@ contextBridge.exposeInMainWorld("widget", {
   isAlwaysOnTop: () => ipcRenderer.invoke("widget:is-always-on-top"),
   close: () => ipcRenderer.send("widget:quit"),
   minimize: () => ipcRenderer.send("widget:minimize"),
+  pin: (enabled) => ipcRenderer.invoke("widget:set-always-on-top", enabled),
   network: () => ipcRenderer.invoke("server:network"),
 });

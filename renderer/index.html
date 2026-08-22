@@ -21,6 +21,7 @@
         <div class="chrome-mark" aria-hidden="true"></div>
         <div class="chrome-title" id="chrome-drag">Character Customization</div>
         <div class="chrome-actions">
+          <button type="button" class="pix-btn electron-only" id="btn-pin" title="Pin on top">PIN</button>
           <button type="button" class="pix-btn electron-only" id="btn-min" title="Minimize">_</button>
           <button type="button" class="pix-btn danger electron-only" id="btn-close" title="Close">x</button>
         </div>
@@ -28,39 +29,38 @@
 
       <section class="dashboard" id="dashboard">
         <div class="cust-board">
-          <div class="slot-grid" id="feature-slots"></div>
+          <div class="col">
+            <div class="col-label">Look</div>
+            <div class="slot-grid" id="feature-slots"></div>
+          </div>
           <div class="hero">
+            <div class="col-label">You</div>
             <div class="hero-frame">
               <canvas id="preview" width="96" height="128"></canvas>
             </div>
             <div class="hero-nav">
               <button type="button" class="nav-sq" id="prev-opt" aria-label="Previous">◀</button>
               <button type="button" class="nav-sq" id="next-opt" aria-label="Next">▶</button>
-              <button type="button" class="nav-wide" id="cloth-cat" title="Clothes"></button>
             </div>
           </div>
-          <div class="slot-grid" id="cloth-slots"></div>
+          <div class="col">
+            <div class="col-label" id="cloth-kind-label">Clothes</div>
+            <div class="slot-grid" id="cloth-slots"></div>
+            <button type="button" class="nav-wide" id="cloth-cat" title="Next clothes set">NEXT</button>
+          </div>
         </div>
         <div class="info-list">
-          <label class="info-row">
-            <span class="info-ico">☺</span>
-            <input id="char-name" maxlength="16" placeholder="your name" />
-          </label>
           <div class="info-row">
-            <span class="info-ico">♀</span>
+            <span class="info-tag">Name</span>
+            <input id="char-name" maxlength="16" placeholder="type here" />
+          </div>
+          <div class="info-row">
+            <span class="info-tag">Pronouns</span>
             <div class="sex-row" id="sex-row">
               <button type="button" class="pix-btn" data-sex="female">She/Her</button>
               <button type="button" class="pix-btn" data-sex="male">He/Him</button>
             </div>
           </div>
-          <button type="button" class="info-row action" id="create-room">
-            <span class="info-ico">+</span>
-            <span>Create room</span>
-          </button>
-          <button type="button" class="info-row action" id="open-join">
-            <span class="info-ico">↪</span>
-            <span>Join room</span>
-          </button>
         </div>
       </section>
 
@@ -78,40 +78,69 @@
 
       <footer class="dock">
         <div class="you" id="you-chip">you</div>
-        <div class="status" id="status">Dress up, then create or join a room.</div>
-        <button type="button" class="pix-btn" id="btn-create">ME</button>
-        <button type="button" class="pix-btn" id="btn-room">ROOM</button>
+        <div class="status" id="status">Dress up, then CREATE or JOIN.</div>
+        <button type="button" class="pix-btn" id="btn-me">ME</button>
+        <button type="button" class="pix-btn" id="btn-create">CREATE</button>
+        <button type="button" class="pix-btn" id="btn-join">JOIN</button>
         <button type="button" class="pix-btn electron-only" id="btn-top" title="Always on top">TOP</button>
       </footer>
-    </div>
 
-    <div class="modal hidden" id="modal-room">
-      <div class="panel">
-        <h2>Join a room</h2>
-        <p class="hint">Same room code + same server URL = you sit together.</p>
-        <label>Room code<input id="room-code" maxlength="16" placeholder="hearth" /></label>
-        <label>Server URL<input id="server-url" maxlength="180" placeholder="http://127.0.0.1:3847" /></label>
-        <p class="hint" id="lan-hint">LAN invite appears after the hearth starts.</p>
-        <div class="panel-actions">
-          <button type="button" class="pix-btn" id="use-local">THIS PC</button>
-          <button type="button" class="pix-btn" id="use-lan">LAN</button>
-          <button type="button" class="pix-btn web-only" id="use-this-site">THIS SITE</button>
-          <button type="button" class="pix-btn" id="copy-invite">COPY LINK</button>
-          <button type="button" class="pix-btn" id="join-room">Join</button>
+      <div class="overlay hidden" id="overlay-create">
+        <div class="panel" role="dialog" aria-labelledby="create-title">
+          <h2 id="create-title">Create a room</h2>
+          <p class="hint">A new code is made for you. Share the link so a friend can sit with you.</p>
+          <p class="hint" id="create-name-line">Name: —</p>
+          <label>Room code<input id="create-code" readonly /></label>
+          <p class="hint" id="create-link-line"></p>
+          <div class="panel-actions">
+            <button type="button" class="pix-btn" id="copy-create-link">COPY LINK</button>
+            <button type="button" class="pix-btn" id="confirm-create">SIT DOWN</button>
+            <button type="button" class="pix-btn ghost overlay-close">BACK</button>
+          </div>
         </div>
       </div>
-    </div>
 
-    <div class="modal hidden" id="modal-interact">
-      <div class="panel">
-        <h2 id="interact-title">Say something tiny</h2>
-        <p class="hint" id="rel-line">Stranger</p>
-        <label>Note<input id="note" maxlength="48" placeholder="thinking of you" /></label>
-        <p class="cooldown" id="cooldown"></p>
-        <div class="panel-actions">
-          <button type="button" class="pix-btn love" id="send-love">LOVE</button>
-          <button type="button" class="pix-btn" id="send-note">SEND</button>
-          <button type="button" class="pix-btn ghost" id="cancel-interact">BACK</button>
+      <div class="overlay hidden" id="overlay-join">
+        <div class="panel" role="dialog" aria-labelledby="join-title">
+          <h2 id="join-title">Join a room</h2>
+          <p class="hint">Same room code + same server = you sit together.</p>
+          <label>Room code<input id="room-code" maxlength="16" placeholder="hearth" /></label>
+          <label>Server URL<input id="server-url" maxlength="180" placeholder="http://127.0.0.1:3847" /></label>
+          <p class="hint" id="lan-hint">LAN invite appears after the hearth starts.</p>
+          <div class="panel-actions">
+            <button type="button" class="pix-btn" id="use-local">THIS PC</button>
+            <button type="button" class="pix-btn" id="use-lan">LAN</button>
+            <button type="button" class="pix-btn web-only" id="use-this-site">THIS SITE</button>
+            <button type="button" class="pix-btn" id="copy-invite">COPY LINK</button>
+            <button type="button" class="pix-btn" id="join-room">JOIN</button>
+            <button type="button" class="pix-btn ghost overlay-close">BACK</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="overlay hidden" id="overlay-me">
+        <div class="panel" role="dialog" aria-labelledby="me-title">
+          <h2 id="me-title">Me</h2>
+          <p class="hint" id="me-hint">Go back to your closet, or keep sitting in the room.</p>
+          <div class="panel-actions">
+            <button type="button" class="pix-btn" id="me-closet">CLOSET</button>
+            <button type="button" class="pix-btn" id="me-room">BACK TO ROOM</button>
+            <button type="button" class="pix-btn ghost overlay-close">CLOSE</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="overlay hidden" id="overlay-interact">
+        <div class="panel">
+          <h2 id="interact-title">Say something tiny</h2>
+          <p class="hint" id="rel-line">Stranger</p>
+          <label>Note<input id="note" maxlength="48" placeholder="thinking of you" /></label>
+          <p class="cooldown" id="cooldown"></p>
+          <div class="panel-actions">
+            <button type="button" class="pix-btn love" id="send-love">LOVE</button>
+            <button type="button" class="pix-btn" id="send-note">SEND</button>
+            <button type="button" class="pix-btn ghost overlay-close">BACK</button>
+          </div>
         </div>
       </div>
     </div>

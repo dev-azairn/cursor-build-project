@@ -101,7 +101,13 @@ function setStatus(text) {
 }
 
 function showModal(id, visible) {
-  $(id).classList.toggle("hidden", !visible);
+  const el = $(id);
+  if (!el) return;
+  el.classList.toggle("hidden", !visible);
+}
+
+function closeOverlays() {
+  document.querySelectorAll(".overlay").forEach((el) => el.classList.add("hidden"));
 }
 
 function showDashboard(visible) {
@@ -215,6 +221,9 @@ function fillClothSlots() {
   root.innerHTML = "";
   const app = state.character.appearance;
   if (state.clothKind === "dress" && app.sex !== "female") state.clothKind = "top";
+  const titles = { dress: "Dress", top: "Tops", bottom: "Bottoms", color: "Colors" };
+  $("cloth-kind-label").textContent = titles[state.clothKind] || "Clothes";
+  $("cloth-cat").textContent = "NEXT";
   const items = clothItems();
   items.forEach((item) => {
     const id = item.id || item.hex || item;
@@ -336,7 +345,7 @@ function openInteract(user) {
   const rel = relationshipWith(user.id);
   $("rel-line").textContent = `${rel.level} · ${rel.score} hearts`;
   updateCooldownUi();
-  showModal("modal-interact", true);
+  showModal("overlay-interact", true);
 }
 
 function updateCooldownUi() {
@@ -446,6 +455,7 @@ async function connectAndJoin() {
         state.meId = res.id;
         state.cooldownMs = res.cooldownMs || state.cooldownMs;
         state.inRoom = true;
+        closeOverlays();
         showDashboard(false);
         setStatus(`${res.room} @ ${url.replace(/^https?:\/\//, "")}`);
       }
@@ -482,7 +492,7 @@ function interact(type) {
       $("rel-line").textContent = `${res.relationship.level} · ${res.relationship.score} hearts`;
     }
     updateCooldownUi();
-    showModal("modal-interact", false);
+    showModal("overlay-interact", false);
   });
 }
 
@@ -513,28 +523,61 @@ function bindUi() {
     });
   });
 
-  $("create-room").addEventListener("click", async () => {
+  async function openCreateOverlay() {
     if (!ensureNamed()) return;
+    closeOverlays();
     state.room = randomRoomCode();
     $("room-code").value = state.room;
+    $("create-code").value = state.room;
     state.serverUrl = normalizeServerUrl($("server-url").value) || (await defaultServerUrl());
+    $("create-name-line").textContent = `Name: ${state.character.name}`;
+    $("create-link-line").textContent = await inviteText();
     saveLocal();
-    await copyInvite();
-    await connectAndJoin();
-  });
-  $("open-join").addEventListener("click", async () => {
+    showModal("overlay-create", true);
+  }
+
+  async function openJoinOverlay() {
     if (!ensureNamed()) return;
+    closeOverlays();
     $("room-code").value = state.room;
     $("server-url").value = state.serverUrl || (await defaultServerUrl());
     await refreshNetworkHint();
-    showModal("modal-room", true);
+    showModal("overlay-join", true);
+  }
+
+  function openMeOverlay() {
+    closeOverlays();
+    if (!state.inRoom) {
+      showDashboard(true);
+      setStatus("Closet · CREATE or JOIN when you are ready.");
+      return;
+    }
+    $("me-hint").textContent = "Closet leaves the room. Back to room keeps you seated.";
+    showModal("overlay-me", true);
+  }
+
+  $("btn-create").addEventListener("click", openCreateOverlay);
+  $("btn-join").addEventListener("click", openJoinOverlay);
+  $("btn-me").addEventListener("click", openMeOverlay);
+
+  $("confirm-create").addEventListener("click", async () => {
+    if (!ensureNamed()) return;
+    state.room = $("create-code").value.trim().toLowerCase() || randomRoomCode();
+    $("room-code").value = state.room;
+    state.serverUrl = normalizeServerUrl($("server-url").value) || (await defaultServerUrl());
+    saveLocal();
+    closeOverlays();
+    await copyInvite();
+    await connectAndJoin();
   });
+  $("copy-create-link").addEventListener("click", copyInvite);
+
   $("join-room").addEventListener("click", async () => {
     if (!ensureNamed()) return;
     state.room = $("room-code").value.trim().toLowerCase() || DEFAULT_ROOM;
     state.serverUrl = normalizeServerUrl($("server-url").value);
     saveLocal();
-    showModal("modal-room", false);
+    closeOverlays();
     await connectAndJoin();
   });
   $("use-local").addEventListener("click", async () => {
@@ -550,27 +593,52 @@ function bindUi() {
   });
   $("copy-invite").addEventListener("click", copyInvite);
 
-  $("btn-create").addEventListener("click", () => {
+  $("me-closet").addEventListener("click", () => {
     if (socket) {
       socket.disconnect();
       socket = null;
     }
     state.inRoom = false;
     state.meId = null;
+    closeOverlays();
     showDashboard(true);
-    setStatus("Dashboard · customize, then create or join.");
+    setStatus("Closet · CREATE or JOIN when you are ready.");
   });
-  $("btn-room").addEventListener("click", async () => {
-    $("room-code").value = state.room;
-    $("server-url").value = state.serverUrl || (await defaultServerUrl());
-    await refreshNetworkHint();
-    showModal("modal-room", true);
+  $("me-room").addEventListener("click", () => {
+    closeOverlays();
+    if (state.inRoom) {
+      showDashboard(false);
+      setStatus(`${state.room} · sitting`);
+    }
   });
-  $("btn-top").addEventListener("click", async () => {
-    state.alwaysOnTop = !state.alwaysOnTop;
-    if (window.widget) await window.widget.setAlwaysOnTop(state.alwaysOnTop);
+
+  document.querySelectorAll(".overlay-close").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      state.selectedId = null;
+      closeOverlays();
+    });
+  });
+  document.querySelectorAll(".overlay").forEach((el) => {
+    el.addEventListener("click", (ev) => {
+      if (ev.target === el) closeOverlays();
+    });
+  });
+  function setPinned(enabled) {
+    state.alwaysOnTop = Boolean(enabled);
+    if (window.widget?.pin) window.widget.pin(state.alwaysOnTop);
+    else window.widget?.setAlwaysOnTop?.(state.alwaysOnTop);
+    $("btn-pin").classList.toggle("on", state.alwaysOnTop);
     $("btn-top").classList.toggle("on", state.alwaysOnTop);
     saveLocal();
+  }
+  $("btn-pin").addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    setPinned(!state.alwaysOnTop);
+  });
+  $("btn-top").addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    setPinned(!state.alwaysOnTop);
   });
   function quitOrClose(ev) {
     ev.preventDefault();
@@ -578,23 +646,18 @@ function bindUi() {
     if (window.widget?.close) window.widget.close();
     else window.close();
   }
-  $("btn-min").addEventListener("mousedown", (ev) => {
-    ev.preventDefault();
+  $("btn-min").addEventListener("click", (ev) => {
     ev.stopPropagation();
     window.widget?.minimize();
   });
-  $("btn-close").addEventListener("mousedown", quitOrClose);
   $("btn-close").addEventListener("click", quitOrClose);
   $("send-love").addEventListener("click", () => interact("love"));
   $("send-note").addEventListener("click", () => interact("message"));
-  $("cancel-interact").addEventListener("click", () => {
-    state.selectedId = null;
-    showModal("modal-interact", false);
-    renderSeats();
-  });
 
+  $("btn-pin").classList.toggle("on", state.alwaysOnTop);
   $("btn-top").classList.toggle("on", state.alwaysOnTop);
-  if (window.widget) window.widget.setAlwaysOnTop(state.alwaysOnTop);
+  if (window.widget?.pin) window.widget.pin(state.alwaysOnTop);
+  else if (window.widget) window.widget.setAlwaysOnTop(state.alwaysOnTop);
 
   setInterval(() => {
     state.animFrame = (state.animFrame + 1) % 8;
@@ -606,7 +669,7 @@ function bindUi() {
         if (user) LoveseatArt.drawCharacter(canvas, user.appearance, { pose: "sit", frame: state.animFrame, scale: 4 });
       });
     }
-    if (!$("modal-interact").classList.contains("hidden")) updateCooldownUi();
+    if (!$("overlay-interact").classList.contains("hidden")) updateCooldownUi();
   }, 180);
 }
 

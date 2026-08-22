@@ -8,8 +8,8 @@ let hosted = { port: DEFAULT_PORT, local: `http://127.0.0.1:${DEFAULT_PORT}`, la
 
 function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
-  const width = 560;
-  const height = 460;
+  const width = 640;
+  const height = 540;
   const x = workArea.x + workArea.width - width - 24;
   const y = workArea.y + workArea.height - height - 24;
 

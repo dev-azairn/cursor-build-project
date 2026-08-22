@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; connect-src 'self' http: https: ws: wss:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self';"
+      content="default-src 'self'; connect-src 'self' http: https: ws: wss: https://api.bigdatacloud.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self';"
     />
     <title>Little Loveseat</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -25,61 +25,82 @@
         </div>
       </header>
 
-      <section class="stage" id="stage">
-        <div class="sky"></div>
-        <div class="moon"></div>
-        <div class="stars"></div>
-        <div class="window-frame"></div>
-        <div class="wall"></div>
+      <section class="dashboard" id="dashboard">
+        <div class="dash-preview">
+          <canvas id="preview" width="80" height="96"></canvas>
+          <div class="pose-row">
+            <button type="button" class="pix-btn" id="pose-sit">SIT</button>
+            <button type="button" class="pix-btn" id="pose-stand">STAND</button>
+          </div>
+          <label>Name<input id="char-name" maxlength="16" placeholder="your name" /></label>
+          <div class="sex-row" id="sex-row">
+            <button type="button" class="pix-btn" data-sex="female">GIRL</button>
+            <button type="button" class="pix-btn" data-sex="male">BOY</button>
+          </div>
+        </div>
+        <div class="dash-pickers">
+          <p class="dash-kicker">Dashboard · dress your chibi</p>
+          <label>Hair
+            <select id="hair"></select>
+          </label>
+          <div class="swatch-label">Hair color</div>
+          <div class="swatches" id="hair-colors"></div>
+          <div class="swatch-label">Eyes</div>
+          <div class="swatches" id="eye-colors"></div>
+          <div class="swatch-label">Skin</div>
+          <div class="swatches" id="skins"></div>
+          <div class="swatch-label">Clothes color</div>
+          <div class="swatches" id="cloth-colors"></div>
+          <label id="wear-dress-wrap">Wear
+            <select id="wear-mode">
+              <option value="dress">Dress</option>
+              <option value="set">Top + bottom</option>
+            </select>
+          </label>
+          <div class="icon-label">Outfit preview</div>
+          <div class="icon-row" id="cloth-icons"></div>
+          <div class="dash-actions">
+            <button type="button" class="pix-btn" id="create-room">CREATE ROOM</button>
+            <button type="button" class="pix-btn" id="open-join">JOIN ROOM</button>
+            <button type="button" class="pix-btn" id="copy-invite">COPY LINK</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="stage hidden" id="stage">
+        <div class="wall-paper"></div>
+        <div class="window-cozy"></div>
+        <div class="sun"></div>
+        <div class="plant"></div>
+        <div class="lamp"></div>
+        <div class="frame"></div>
+        <div class="sofa"></div>
+        <div class="loveseat-furn"></div>
+        <div class="armchair"></div>
+        <div class="cushion"></div>
+        <div class="nook"></div>
         <div class="floor"></div>
         <div class="rug"></div>
-        <div class="seats" id="seats"></div>
+        <div class="hotspots" id="hotspots"></div>
+        <div class="people" id="people"></div>
         <div class="fx" id="fx"></div>
+        <aside class="places" id="places"></aside>
       </section>
 
       <footer class="dock">
-        <div class="you" id="you-chip">offline</div>
-        <div class="status" id="status">Waiting for the hearth…</div>
+        <div class="you" id="you-chip">you</div>
+        <div class="status" id="status">Dress up, then create or join a room.</div>
         <button type="button" class="pix-btn" id="btn-create">ME</button>
         <button type="button" class="pix-btn" id="btn-room">ROOM</button>
+        <button type="button" class="pix-btn" id="btn-locate">PLACE</button>
         <button type="button" class="pix-btn electron-only" id="btn-top" title="Always on top">TOP</button>
       </footer>
     </div>
 
-    <div class="modal hidden" id="modal-create">
-      <div class="panel">
-        <h2>Who sits here?</h2>
-        <label>Name<input id="char-name" maxlength="16" placeholder="your name" /></label>
-        <div class="preview-row">
-          <canvas id="preview" width="64" height="80"></canvas>
-          <div class="pickers">
-            <label>Skin
-              <select id="skin"></select>
-            </label>
-            <label>Hair
-              <select id="hair"></select>
-            </label>
-            <label>Hair color
-              <select id="hair-color"></select>
-            </label>
-            <label>Shirt
-              <select id="shirt"></select>
-            </label>
-            <label>Accent
-              <select id="accent"></select>
-            </label>
-          </div>
-        </div>
-        <div class="panel-actions">
-          <button type="button" class="pix-btn" id="save-char">Sit down</button>
-        </div>
-      </div>
-    </div>
-
     <div class="modal hidden" id="modal-room">
       <div class="panel">
-        <h2>Join a room</h2>
-        <p class="hint">Same room code + same server URL = you sit together. Deploy the Node server, then paste that https URL here.</p>
+        <h2>Join a cozy room</h2>
+        <p class="hint">Share the join link so a friend can sit with you online.</p>
         <label>Room code<input id="room-code" maxlength="16" placeholder="hearth" /></label>
         <label>Server URL<input id="server-url" maxlength="180" placeholder="http://127.0.0.1:3847" /></label>
         <p class="hint" id="lan-hint">LAN invite appears after the hearth starts.</p>
@@ -87,7 +108,7 @@
           <button type="button" class="pix-btn" id="use-local">THIS PC</button>
           <button type="button" class="pix-btn" id="use-lan">LAN</button>
           <button type="button" class="pix-btn web-only" id="use-this-site">THIS SITE</button>
-          <button type="button" class="pix-btn" id="copy-invite">COPY</button>
+          <button type="button" class="pix-btn" id="copy-invite-modal">COPY</button>
           <button type="button" class="pix-btn" id="join-room">Join</button>
         </div>
       </div>
@@ -98,9 +119,10 @@
         <h2 id="interact-title">Say something tiny</h2>
         <p class="hint" id="rel-line">Stranger</p>
         <label>Note<input id="note" maxlength="48" placeholder="thinking of you" /></label>
+        <div class="swatch-label">Love emotes</div>
+        <div class="emote-row" id="love-emotes"></div>
         <p class="cooldown" id="cooldown"></p>
         <div class="panel-actions">
-          <button type="button" class="pix-btn love" id="send-love">LOVE</button>
           <button type="button" class="pix-btn" id="send-note">SEND</button>
           <button type="button" class="pix-btn ghost" id="cancel-interact">BACK</button>
         </div>
@@ -108,6 +130,7 @@
     </div>
 
     <script src="./vendor/socket.io.min.js"></script>
+    <script src="./styles.js"></script>
     <script src="./sprites.js"></script>
     <script src="./app.js"></script>
   </body>

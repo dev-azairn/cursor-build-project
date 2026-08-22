@@ -2,7 +2,8 @@ const STORAGE_KEY = "little-loveseat-v2";
 const PLAYER_KEY = "little-loveseat-player";
 const DEFAULT_ROOM = "hearth";
 const isWeb = location.protocol.startsWith("http");
-const FURNITURE = LoveseatStyles.FURNITURE;
+const FEATURES = ["accessory", "hair", "eyes", "sex", "skin", "pose"];
+const CLOTH_KINDS = ["dress", "top", "bottom", "color"];
 
 const state = {
   character: {
@@ -13,19 +14,19 @@ const state = {
   serverUrl: "",
   alwaysOnTop: true,
   lastInteractAt: 0,
-  cooldownMs: 15 * 1000,
+  cooldownMs: 5 * 60 * 1000,
   meId: null,
   selectedId: null,
-  previewPose: "sit",
-  animFrame: 0,
   inRoom: false,
-  walk: null,
+  feature: "hair",
+  clothKind: "dress",
+  animFrame: 0,
+  previewPose: "stand",
   snapshot: { seats: Array(6).fill(null), users: {}, relationships: {}, bubbles: [] },
 };
 
 let socket = null;
 let seenBubbles = new Set();
-let localPos = {};
 
 function playerId() {
   let id = localStorage.getItem(PLAYER_KEY) || "";
@@ -90,7 +91,9 @@ function remainingMs() {
 
 function formatWait(ms) {
   const s = Math.ceil(ms / 1000);
-  return `0:${String(s).padStart(2, "0")}`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
 }
 
 function setStatus(text) {
@@ -104,268 +107,220 @@ function showModal(id, visible) {
 function showDashboard(visible) {
   $("dashboard").classList.toggle("hidden", !visible);
   $("stage").classList.toggle("hidden", visible);
+  $("chrome-drag").textContent = visible ? "Character Customization" : "Little Loveseat";
 }
 
 function randomRoomCode() {
-  const words = ["hearth", "cocoa", "petal", "nook", "honey", "maple", "cloud", "peach"];
+  const words = ["hearth", "cocoa", "petal", "nook", "honey", "maple"];
   return `${words[Math.floor(Math.random() * words.length)]}${Math.floor(10 + Math.random() * 89)}`;
 }
 
-function readAppearanceFromUi() {
-  const sex = state.character.appearance.sex;
-  state.character.appearance = LoveseatArt.appearanceOf({
-    ...state.character.appearance,
-    sex,
-    hair: $("hair").value,
-    wearDress: sex === "female" && $("wear-mode").value === "dress",
-  });
+function featureItems() {
+  const app = state.character.appearance;
+  if (state.feature === "accessory") return LoveseatStyles.ACCESSORIES.map((a) => a.id);
+  if (state.feature === "hair") return LoveseatStyles.hairForSex(app.sex).map((h) => h.id);
+  if (state.feature === "eyes") return LoveseatStyles.EYE_COLORS.map((c) => c.hex);
+  if (state.feature === "sex") return ["female", "male"];
+  if (state.feature === "skin") return LoveseatStyles.SKINS;
+  return ["stand", "sit"];
+}
+
+function currentFeatureValue() {
+  const app = state.character.appearance;
+  if (state.feature === "accessory") return app.accessory;
+  if (state.feature === "hair") return app.hair;
+  if (state.feature === "eyes") return app.eyeColor;
+  if (state.feature === "sex") return app.sex;
+  if (state.feature === "skin") return app.skin;
+  return state.previewPose;
+}
+
+function applyFeatureValue(value) {
+  const app = state.character.appearance;
+  if (state.feature === "accessory") app.accessory = value;
+  else if (state.feature === "hair") app.hair = value;
+  else if (state.feature === "eyes") app.eyeColor = value;
+  else if (state.feature === "sex") {
+    state.character.appearance = LoveseatStyles.defaultAppearance(value);
+  } else if (state.feature === "skin") app.skin = value;
+  else state.previewPose = value;
+  syncCustomize();
+}
+
+function cycleFeature(dir) {
+  const items = featureItems();
+  const i = Math.max(0, items.indexOf(currentFeatureValue()));
+  applyFeatureValue(items[(i + dir + items.length) % items.length]);
+}
+
+function clothItems() {
+  const app = state.character.appearance;
+  if (state.clothKind === "dress") return app.sex === "female" ? LoveseatStyles.DRESSES : [];
+  if (state.clothKind === "top") return LoveseatStyles.TOPS;
+  if (state.clothKind === "bottom") return LoveseatStyles.bottomsForSex(app.sex);
+  return LoveseatStyles.CLOTH_COLORS;
 }
 
 function renderPreview() {
   LoveseatArt.drawCharacter($("preview"), state.character.appearance, {
     pose: state.previewPose,
     frame: state.animFrame,
+    scale: 6,
   });
 }
 
-function swatchButton(hex, selected, onClick) {
+function slotButton(selected, draw, onClick) {
   const btn = document.createElement("button");
   btn.type = "button";
-  btn.className = `swatch ${selected ? "on" : ""}`;
-  btn.style.background = hex;
-  btn.title = hex;
+  btn.className = `slot ${selected ? "on" : ""}`;
+  const canvas = document.createElement("canvas");
+  canvas.width = 36;
+  canvas.height = 36;
+  draw(canvas);
+  btn.appendChild(canvas);
   btn.addEventListener("click", onClick);
   return btn;
 }
 
-function fillSwatches(rootId, colors, current, apply) {
-  const root = $(rootId);
+function fillFeatureSlots() {
+  const root = $("feature-slots");
   root.innerHTML = "";
-  colors.forEach((item) => {
-    const hex = item.hex || item;
-    root.appendChild(swatchButton(hex, hex.toLowerCase() === String(current).toLowerCase(), () => apply(hex)));
+  const app = state.character.appearance;
+  FEATURES.forEach((id) => {
+    root.appendChild(
+      slotButton(state.feature === id, (canvas) => {
+        if (id === "accessory") LoveseatArt.drawClothIcon(canvas, "accessory", app.accessory, app.clothColor);
+        else if (id === "hair") LoveseatArt.drawClothIcon(canvas, "hair", app.hair, app.hairColor);
+        else if (id === "eyes") {
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = app.eyeColor;
+          ctx.fillRect(8, 8, 20, 20);
+        } else if (id === "sex") {
+          LoveseatArt.drawCharacter(canvas, app, { pose: "stand", scale: 2, frame: 0 });
+        } else if (id === "skin") {
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = app.skin;
+          ctx.fillRect(6, 6, 24, 24);
+        } else LoveseatArt.drawCharacter(canvas, app, { pose: state.previewPose, scale: 2, frame: 0 });
+      }, () => {
+        state.feature = id;
+        syncCustomize();
+      })
+    );
   });
 }
 
-function fillHair() {
-  const list = LoveseatStyles.hairForSex(state.character.appearance.sex);
-  $("hair").innerHTML = list.map((h) => `<option value="${h.id}">${h.name}</option>`).join("");
-  if (!list.some((h) => h.id === state.character.appearance.hair)) {
-    state.character.appearance.hair = list[0].id;
-  }
-  $("hair").value = state.character.appearance.hair;
-}
-
-function fillClothIcons() {
-  const app = state.character.appearance;
-  const root = $("cloth-icons");
+function fillClothSlots() {
+  const root = $("cloth-slots");
   root.innerHTML = "";
-  const color = app.clothColor;
-  const items = app.wearDress && app.sex === "female"
-    ? LoveseatStyles.DRESSES.map((d) => ({ kind: "dress", id: d.id, name: d.name, selected: app.dress === d.id }))
-    : [
-        ...LoveseatStyles.TOPS.map((t) => ({ kind: "top", id: t.id, name: t.name, selected: app.top === t.id })),
-        ...LoveseatStyles.bottomsForSex(app.sex).map((b) => ({
-          kind: "bottom",
-          id: b.id,
-          name: b.name,
-          selected: app.bottom === b.id,
-        })),
-      ];
+  const app = state.character.appearance;
+  if (state.clothKind === "dress" && app.sex !== "female") state.clothKind = "top";
+  const items = clothItems();
   items.forEach((item) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = `icon-btn ${item.selected ? "on" : ""}`;
-    btn.title = item.name;
-    const canvas = document.createElement("canvas");
-    canvas.width = 36;
-    canvas.height = 36;
-    LoveseatArt.drawClothIcon(canvas, item.kind, item.id, color);
-    btn.appendChild(canvas);
-    btn.addEventListener("click", () => {
-      if (item.kind === "dress") app.dress = item.id;
-      if (item.kind === "top") app.top = item.id;
-      if (item.kind === "bottom") app.bottom = item.id;
-      fillClothIcons();
-      renderPreview();
-    });
-    root.appendChild(btn);
+    const id = item.id || item.hex || item;
+    const selected =
+      (state.clothKind === "dress" && app.wearDress && app.dress === id) ||
+      (state.clothKind === "top" && !app.wearDress && app.top === id) ||
+      (state.clothKind === "bottom" && !app.wearDress && app.bottom === id) ||
+      (state.clothKind === "color" && app.clothColor.toLowerCase() === String(id).toLowerCase());
+    root.appendChild(
+      slotButton(selected, (canvas) => {
+        if (state.clothKind === "color") {
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = id;
+          ctx.fillRect(4, 4, 28, 28);
+        } else LoveseatArt.drawClothIcon(canvas, state.clothKind, id, app.clothColor);
+      }, () => {
+        if (state.clothKind === "dress") {
+          app.wearDress = true;
+          app.dress = id;
+        } else if (state.clothKind === "top") {
+          app.wearDress = false;
+          app.top = id;
+        } else if (state.clothKind === "bottom") {
+          app.wearDress = false;
+          app.bottom = id;
+        } else app.clothColor = id;
+        syncCustomize();
+      })
+    );
   });
 }
 
-function syncCustomizeUi() {
-  const app = state.character.appearance;
+function syncCustomize() {
   document.querySelectorAll("#sex-row [data-sex]").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.sex === app.sex);
+    btn.classList.toggle("active", btn.dataset.sex === state.character.appearance.sex);
   });
-  $("wear-dress-wrap").classList.toggle("hidden", app.sex !== "female");
-  $("wear-mode").value = app.wearDress ? "dress" : "set";
-  fillHair();
-  fillSwatches("hair-colors", LoveseatStyles.HAIR_COLORS, app.hairColor, (hex) => {
-    app.hairColor = hex;
-    syncCustomizeUi();
-    renderPreview();
-  });
-  fillSwatches("eye-colors", LoveseatStyles.EYE_COLORS, app.eyeColor, (hex) => {
-    app.eyeColor = hex;
-    syncCustomizeUi();
-    renderPreview();
-  });
-  fillSwatches("skins", LoveseatStyles.SKINS.map((hex) => ({ hex })), app.skin, (hex) => {
-    app.skin = hex;
-    syncCustomizeUi();
-    renderPreview();
-  });
-  fillSwatches("cloth-colors", LoveseatStyles.CLOTH_COLORS, app.clothColor, (hex) => {
-    app.clothColor = hex;
-    syncCustomizeUi();
-    renderPreview();
-  });
-  fillClothIcons();
+  fillFeatureSlots();
+  fillClothSlots();
   renderPreview();
 }
 
-function personEl(user) {
-  const pos = localPos[user.id] || { x: user.x, y: user.y, pose: user.pose, facing: user.facing };
-  const el = document.createElement("button");
-  el.type = "button";
-  el.className = `person ${user.id === state.meId ? "mine" : ""} ${user.id === state.selectedId ? "selected" : ""}`;
-  el.style.left = `${pos.x}px`;
-  el.style.top = `${pos.y}px`;
-  const canvas = document.createElement("canvas");
-  canvas.width = 80;
-  canvas.height = 96;
-  LoveseatArt.drawCharacter(canvas, user.appearance, {
-    pose: pos.pose || user.pose || "sit",
-    frame: state.animFrame,
-    facing: pos.facing || user.facing || "right",
-  });
-  const name = document.createElement("div");
-  name.className = "seat-name";
-  name.textContent = user.name;
-  const place = document.createElement("div");
-  place.className = "place-tag";
-  place.textContent = user.location?.label || "";
-  el.append(canvas, name, place);
-  el.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    if (user.id === state.meId) return;
-    openInteract(user);
-  });
-  return el;
-}
-
-function renderPlaces() {
-  const users = Object.values(state.snapshot.users || {});
-  const lines = users
-    .filter((u) => u.location?.label)
-    .map((u) => `${u.name}: ${u.location.label}`);
-  $("places").innerHTML = lines.length
-    ? `<strong>Where we are</strong><br>${lines.join("<br>")}`
-    : "Share PLACE so friends can see your city.";
-}
-
-function renderRoom() {
-  const people = $("people");
-  people.innerHTML = "";
-  Object.values(state.snapshot.users || {}).forEach((user) => {
-    if (!localPos[user.id]) {
-      localPos[user.id] = {
-        x: user.x ?? FURNITURE[user.seat || 0].x,
-        y: user.y ?? FURNITURE[user.seat || 0].y,
-        pose: user.pose || "sit",
-        facing: user.facing || "right",
-      };
-    }
-    people.appendChild(personEl(user));
-  });
-  renderPlaces();
-}
-
-function buildHotspots() {
-  const root = $("hotspots");
+function renderSeats() {
+  const root = $("seats");
   root.innerHTML = "";
-  FURNITURE.forEach((spot) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "hotspot";
-    btn.title = `Sit: ${spot.name}`;
-    btn.style.left = `${spot.x - 28}px`;
-    btn.style.top = `${spot.y - 10}px`;
-    btn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      walkTo(spot.x, spot.y, "sit", spot.id);
+  for (let i = 0; i < 6; i += 1) {
+    const userId = state.snapshot.seats[i];
+    const user = userId ? state.snapshot.users[userId] : null;
+    const seat = document.createElement("button");
+    seat.type = "button";
+    seat.className = `seat ${user ? "" : "empty"} ${userId === state.meId ? "mine" : ""} ${
+      userId && userId === state.selectedId ? "selected" : ""
+    }`;
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 80;
+    if (user) {
+      LoveseatArt.drawCharacter(canvas, user.appearance, { pose: "sit", frame: state.animFrame, scale: 4 });
+    }
+    const stool = document.createElement("div");
+    stool.className = "stool";
+    const name = document.createElement("div");
+    name.className = "seat-name";
+    name.textContent = user ? user.name : "empty";
+    seat.append(canvas, stool, name);
+    seat.addEventListener("click", () => {
+      if (!user || user.id === state.meId) return;
+      openInteract(user);
     });
-    root.appendChild(btn);
-  });
-}
-
-function walkTo(x, y, pose, seat) {
-  if (!state.meId) return;
-  const from = localPos[state.meId] || { x, y };
-  state.walk = {
-    fromX: from.x,
-    fromY: from.y,
-    toX: Math.max(40, Math.min(500, x)),
-    toY: Math.max(120, Math.min(230, y)),
-    start: performance.now(),
-    pose,
-    seat: Number.isInteger(seat) ? seat : null,
-  };
-  const facing = state.walk.toX < from.x ? "left" : "right";
-  if (localPos[state.meId]) {
-    localPos[state.meId].pose = "walk";
-    localPos[state.meId].facing = facing;
+    root.appendChild(seat);
   }
-  socket?.emit("room:move", {
-    x: state.walk.toX,
-    y: state.walk.toY,
-    pose,
-    seat: state.walk.seat,
-    facing,
-  });
 }
 
-function tickWalk() {
-  if (!state.walk || !state.meId) return;
-  const dist = Math.hypot(state.walk.toX - state.walk.fromX, state.walk.toY - state.walk.fromY);
-  const dur = Math.max(180, (dist / 90) * 1000);
-  const t = Math.min(1, (performance.now() - state.walk.start) / dur);
-  const x = state.walk.fromX + (state.walk.toX - state.walk.fromX) * t;
-  const y = state.walk.fromY + (state.walk.toY - state.walk.fromY) * t;
-  localPos[state.meId] = {
-    x,
-    y,
-    pose: t < 1 ? "walk" : state.walk.pose,
-    facing: state.walk.toX < state.walk.fromX ? "left" : "right",
-  };
-  if (t >= 1) state.walk = null;
-}
-
-function spawnFx(text, fromId) {
-  const user = state.snapshot.users[fromId];
-  const pos = localPos[fromId];
-  if (!user && !pos) return;
-  const heart = document.createElement("div");
-  heart.className = "heart-fx";
-  heart.textContent = text || "♥";
-  heart.style.left = `${(pos?.x || 80) + 8}px`;
-  heart.style.top = `${(pos?.y || 160) - 90}px`;
-  $("fx").appendChild(heart);
-  setTimeout(() => heart.remove(), 1400);
+function spawnFx(type, fromId) {
+  const seats = [...document.querySelectorAll(".seat")];
+  const index = state.snapshot.seats.indexOf(fromId);
+  const node = seats[index];
+  if (!node) return;
+  const rect = node.getBoundingClientRect();
+  const stage = $("stage").getBoundingClientRect();
+  if (type === "love") {
+    const heart = document.createElement("div");
+    heart.className = "heart-fx";
+    heart.textContent = "♥";
+    heart.style.left = `${rect.left - stage.left + 28}px`;
+    heart.style.top = `${rect.top - stage.top + 8}px`;
+    $("fx").appendChild(heart);
+    setTimeout(() => heart.remove(), 1400);
+  }
 }
 
 function showBubble(bubble) {
   if (seenBubbles.has(bubble.id)) return;
   seenBubbles.add(bubble.id);
-  const pos = localPos[bubble.from];
+  const seats = [...document.querySelectorAll(".seat")];
+  const index = state.snapshot.seats.indexOf(bubble.from);
+  const node = seats[index];
+  if (!node) return;
+  const rect = node.getBoundingClientRect();
+  const stage = $("stage").getBoundingClientRect();
   const el = document.createElement("div");
   el.className = `bubble ${bubble.type === "love" ? "love" : ""}`;
   el.textContent = bubble.text;
-  el.style.left = `${Math.min(pos?.x || 40, 380)}px`;
-  el.style.top = `${Math.max(8, (pos?.y || 160) - 110)}px`;
+  el.style.left = `${Math.min(rect.left - stage.left, 380)}px`;
+  el.style.top = `${Math.max(8, rect.top - stage.top - 8)}px`;
   $("fx").appendChild(el);
-  if (bubble.type === "love") spawnFx(bubble.text, bubble.from);
+  if (bubble.type === "love") spawnFx("love", bubble.from);
   setTimeout(() => el.remove(), 2800);
 }
 
@@ -376,7 +331,7 @@ function relationshipWith(targetId) {
 
 function openInteract(user) {
   state.selectedId = user.id;
-  renderRoom();
+  renderSeats();
   $("interact-title").textContent = user.name;
   const rel = relationshipWith(user.id);
   $("rel-line").textContent = `${rel.level} · ${rel.score} hearts`;
@@ -387,13 +342,11 @@ function openInteract(user) {
 function updateCooldownUi() {
   const wait = remainingMs();
   const locked = wait > 0;
-  document.querySelectorAll(".emote-btn").forEach((btn) => {
-    btn.disabled = locked;
-  });
+  $("send-love").disabled = locked;
   $("send-note").disabled = locked;
   $("cooldown").textContent = locked
-    ? `Next note in ${formatWait(wait)}`
-    : "Love emotes and notes wait 15 seconds.";
+    ? `Next interaction in ${formatWait(wait)}`
+    : "You can send love or a short note.";
 }
 
 function applySnapshot(snapshot) {
@@ -401,17 +354,8 @@ function applySnapshot(snapshot) {
   state.cooldownMs = snapshot.cooldownMs || state.cooldownMs;
   $("you-chip").textContent = state.character.name || "you";
   const count = Object.keys(snapshot.users || {}).length;
-  if (state.inRoom) setStatus(`${state.room} · ${count} in the living room`);
-  Object.values(snapshot.users || {}).forEach((user) => {
-    if (user.id === state.meId && state.walk) return;
-    localPos[user.id] = {
-      x: user.x,
-      y: user.y,
-      pose: user.pose,
-      facing: user.facing || "right",
-    };
-  });
-  renderRoom();
+  if (state.inRoom) setStatus(`${state.room} · ${count} sitting`);
+  renderSeats();
   (snapshot.bubbles || []).forEach(showBubble);
 }
 
@@ -445,15 +389,10 @@ async function refreshNetworkHint() {
   const lan = net?.lan?.[0];
   const local = net?.local || (isWeb ? location.origin : "http://127.0.0.1:3847");
   const remote = net?.remote;
-  if (isWeb) {
-    $("lan-hint").textContent = `This site ${location.origin}. Friends open this page, same room code.`;
-  } else if (remote) {
-    $("lan-hint").textContent = `Public ${remote} · this PC ${local}${lan ? ` · LAN ${lan}` : ""}`;
-  } else if (lan) {
-    $("lan-hint").textContent = `This PC ${local} · LAN ${lan}`;
-  } else {
-    $("lan-hint").textContent = `This PC ${local}. Deploy with npm run server for internet play.`;
-  }
+  if (isWeb) $("lan-hint").textContent = `This site ${location.origin}. Friends open this page, same room code.`;
+  else if (remote) $("lan-hint").textContent = `Public ${remote} · this PC ${local}${lan ? ` · LAN ${lan}` : ""}`;
+  else if (lan) $("lan-hint").textContent = `This PC ${local} · LAN ${lan}`;
+  else $("lan-hint").textContent = `This PC ${local}. Deploy with npm run server for internet play.`;
   return net;
 }
 
@@ -464,8 +403,8 @@ function ensureNamed() {
     setStatus("Name your chibi first.");
     return false;
   }
-  readAppearanceFromUi();
   state.character.name = name;
+  state.character.appearance = LoveseatArt.appearanceOf(state.character.appearance);
   saveLocal();
   return true;
 }
@@ -508,7 +447,7 @@ async function connectAndJoin() {
         state.cooldownMs = res.cooldownMs || state.cooldownMs;
         state.inRoom = true;
         showDashboard(false);
-        setStatus(`${res.room} · cozy living room`);
+        setStatus(`${res.room} @ ${url.replace(/^https?:\/\//, "")}`);
       }
     );
   });
@@ -523,10 +462,10 @@ async function connectAndJoin() {
   });
 }
 
-function interact(type, emote) {
+function interact(type) {
   if (!socket || remainingMs() > 0) return;
-  const text = type === "love" ? emote : $("note").value.trim();
-  socket.emit("interact", { type, targetId: state.selectedId, text, emote }, (res) => {
+  const text = $("note").value.trim();
+  socket.emit("interact", { type, targetId: state.selectedId, text }, (res) => {
     if (!res?.ok) {
       if (res?.waitMs) {
         state.lastInteractAt = Date.now() - (state.cooldownMs - res.waitMs);
@@ -547,94 +486,31 @@ function interact(type, emote) {
   });
 }
 
-async function shareLocation() {
-  if (!socket || !state.inRoom) {
-    setStatus("Join a room first, then share PLACE.");
-    return;
-  }
-  setStatus("Finding your city…");
-  const fallback = Intl.DateTimeFormat().resolvedOptions().timeZone.replace(/_/g, " ");
-  const send = (location) => {
-    socket.emit("location:share", location, (res) => {
-      setStatus(res?.ok ? `Shared ${location.label}` : res?.error || "Could not share place.");
-    });
-  };
-  if (!navigator.geolocation) {
-    send({ label: fallback });
-    return;
-  }
-  navigator.geolocation.getCurrentPosition(
-    async (pos) => {
-      const lat = Math.round(pos.coords.latitude * 100) / 100;
-      const lng = Math.round(pos.coords.longitude * 100) / 100;
-      try {
-        const res = await fetch(
-          `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
-        );
-        const data = await res.json();
-        const label = [data.city || data.locality, data.principalSubdivision, data.countryName]
-          .filter(Boolean)
-          .slice(0, 2)
-          .join(", ") || fallback;
-        send({ label, lat, lng });
-      } catch {
-        send({ label: fallback, lat, lng });
-      }
-    },
-    () => send({ label: fallback }),
-    { timeout: 8000, maximumAge: 600000 }
-  );
-}
-
 function bindUi() {
   $("char-name").value = state.character.name;
   $("room-code").value = state.room;
-  $("wear-mode").value = state.character.appearance.wearDress ? "dress" : "set";
-  syncCustomizeUi();
-  buildHotspots();
-
+  syncCustomize();
   refreshNetworkHint().then(async () => {
     if (!state.serverUrl) state.serverUrl = await defaultServerUrl();
     $("server-url").value = state.serverUrl;
   });
 
-  $("hair").addEventListener("change", () => {
-    state.character.appearance.hair = $("hair").value;
-    renderPreview();
-  });
-  $("wear-mode").addEventListener("change", () => {
-    state.character.appearance.wearDress = $("wear-mode").value === "dress";
-    fillClothIcons();
-    renderPreview();
+  $("prev-opt").addEventListener("click", () => cycleFeature(-1));
+  $("next-opt").addEventListener("click", () => cycleFeature(1));
+  $("cloth-cat").addEventListener("click", () => {
+    const kinds = state.character.appearance.sex === "female" ? CLOTH_KINDS : ["top", "bottom", "color"];
+    const i = Math.max(0, kinds.indexOf(state.clothKind));
+    state.clothKind = kinds[(i + 1) % kinds.length];
+    fillClothSlots();
   });
   document.querySelectorAll("#sex-row [data-sex]").forEach((btn) => {
     btn.addEventListener("click", () => {
+      const name = state.character.name;
       state.character.appearance = LoveseatStyles.defaultAppearance(btn.dataset.sex);
-      syncCustomizeUi();
+      state.character.name = name;
+      state.clothKind = btn.dataset.sex === "female" ? "dress" : "top";
+      syncCustomize();
     });
-  });
-  $("pose-sit").addEventListener("click", () => {
-    state.previewPose = "sit";
-    $("pose-sit").classList.add("active");
-    $("pose-stand").classList.remove("active");
-    renderPreview();
-  });
-  $("pose-stand").addEventListener("click", () => {
-    state.previewPose = "stand";
-    $("pose-stand").classList.add("active");
-    $("pose-sit").classList.remove("active");
-    renderPreview();
-  });
-  $("pose-sit").classList.add("active");
-
-  const emotes = $("love-emotes");
-  LoveseatStyles.LOVE_EMOTES.forEach((emote) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "emote-btn";
-    btn.textContent = emote;
-    btn.addEventListener("click", () => interact("love", emote));
-    emotes.appendChild(btn);
   });
 
   $("create-room").addEventListener("click", async () => {
@@ -646,7 +522,6 @@ function bindUi() {
     await copyInvite();
     await connectAndJoin();
   });
-
   $("open-join").addEventListener("click", async () => {
     if (!ensureNamed()) return;
     $("room-code").value = state.room;
@@ -654,7 +529,6 @@ function bindUi() {
     await refreshNetworkHint();
     showModal("modal-room", true);
   });
-
   $("join-room").addEventListener("click", async () => {
     if (!ensureNamed()) return;
     state.room = $("room-code").value.trim().toLowerCase() || DEFAULT_ROOM;
@@ -663,7 +537,6 @@ function bindUi() {
     showModal("modal-room", false);
     await connectAndJoin();
   });
-
   $("use-local").addEventListener("click", async () => {
     const net = await refreshNetworkHint();
     $("server-url").value = net?.local || "http://127.0.0.1:3847";
@@ -676,11 +549,15 @@ function bindUi() {
     $("server-url").value = location.origin;
   });
   $("copy-invite").addEventListener("click", copyInvite);
-  $("copy-invite-modal").addEventListener("click", copyInvite);
 
   $("btn-create").addEventListener("click", () => {
-    showDashboard(true);
+    if (socket) {
+      socket.disconnect();
+      socket = null;
+    }
     state.inRoom = false;
+    state.meId = null;
+    showDashboard(true);
     setStatus("Dashboard · customize, then create or join.");
   });
   $("btn-room").addEventListener("click", async () => {
@@ -689,25 +566,31 @@ function bindUi() {
     await refreshNetworkHint();
     showModal("modal-room", true);
   });
-  $("btn-locate").addEventListener("click", shareLocation);
   $("btn-top").addEventListener("click", async () => {
     state.alwaysOnTop = !state.alwaysOnTop;
     if (window.widget) await window.widget.setAlwaysOnTop(state.alwaysOnTop);
     $("btn-top").classList.toggle("on", state.alwaysOnTop);
     saveLocal();
   });
-  $("btn-min").addEventListener("click", () => window.widget?.minimize());
-  $("btn-close").addEventListener("click", () => window.widget?.close());
+  function quitOrClose(ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (window.widget?.close) window.widget.close();
+    else window.close();
+  }
+  $("btn-min").addEventListener("mousedown", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    window.widget?.minimize();
+  });
+  $("btn-close").addEventListener("mousedown", quitOrClose);
+  $("btn-close").addEventListener("click", quitOrClose);
+  $("send-love").addEventListener("click", () => interact("love"));
   $("send-note").addEventListener("click", () => interact("message"));
   $("cancel-interact").addEventListener("click", () => {
     state.selectedId = null;
     showModal("modal-interact", false);
-    renderRoom();
-  });
-  $("stage").addEventListener("click", (ev) => {
-    if (!state.meId) return;
-    const rect = $("stage").getBoundingClientRect();
-    walkTo(ev.clientX - rect.left, ev.clientY - rect.top, "stand", null);
+    renderSeats();
   });
 
   $("btn-top").classList.toggle("on", state.alwaysOnTop);
@@ -715,10 +598,15 @@ function bindUi() {
 
   setInterval(() => {
     state.animFrame = (state.animFrame + 1) % 8;
-    tickWalk();
-    renderPreview();
-    if (!$("stage").classList.contains("hidden")) renderRoom();
-    updateCooldownUi();
+    if (!$("dashboard").classList.contains("hidden")) renderPreview();
+    if (state.inRoom && !$("stage").classList.contains("hidden")) {
+      document.querySelectorAll(".seat canvas").forEach((canvas, i) => {
+        const userId = state.snapshot.seats[i];
+        const user = userId ? state.snapshot.users[userId] : null;
+        if (user) LoveseatArt.drawCharacter(canvas, user.appearance, { pose: "sit", frame: state.animFrame, scale: 4 });
+      });
+    }
+    if (!$("modal-interact").classList.contains("hidden")) updateCooldownUi();
   }, 180);
 }
 
